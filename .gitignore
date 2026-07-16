@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.env
+
+# Personal data / generated artefacts — never commit
+profile.json
+*.docx
+*.pdf
+outputs/

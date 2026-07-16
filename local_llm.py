@@ -1,0 +1,113 @@
+"""Local LLM client for the offline drafting MVP.
+
+Talks to an OpenAI-compatible local endpoint (LM Studio by default, on :1234)
+using the **raw** ``/v1/completions`` endpoint with a hand-built qwen ChatML
+prompt. A pre-closed ``<think></think>`` block is prefilled into the assistant
+turn, which stops the reasoning-model from burning its whole token budget
+thinking (LM Studio ignores the API-level thinking switches — ``/no_think``,
+``enable_thinking:false`` and ``response_format`` all leave ``content`` empty).
+That prefill turns a 40-70s empty response into a ~9s clean, parseable one.
+
+Dependency-light on purpose: stdlib ``urllib`` only, so it drops into the
+project's existing venv without new installs. Model-agnostic via ``model`` /
+``base_url`` (qwen family shares the ChatML template, so Ollama qwen works too).
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import socket
+import urllib.error
+import urllib.request
+from dataclasses import dataclass
+from urllib.parse import urlparse
+
+DEFAULT_BASE_URL = "http://localhost:1234/v1"
+DEFAULT_MODEL = "qwen/qwen3.6-27b"
+STOP = "<|im_end|>"
+
+
+class LocalLLMError(RuntimeError):
+    """Raised when the endpoint is unreachable or returns unusable output."""
+
+
+@dataclass
+class LocalLLM:
+    base_url: str = DEFAULT_BASE_URL
+    model: str = DEFAULT_MODEL
+    timeout: int = 180
+    temperature: float = 0.0
+
+    # -- connectivity ------------------------------------------------------ #
+    def is_up(self, connect_timeout: float = 1.5) -> bool:
+        """True if something is listening on the endpoint's host/port."""
+        parsed = urlparse(self.base_url)
+        host, port = parsed.hostname or "localhost", parsed.port or 80
+        try:
+            with socket.create_connection((host, port), timeout=connect_timeout):
+                return True
+        except OSError:
+            return False
+
+    # -- prompt build ------------------------------------------------------ #
+    @staticmethod
+    def build_prompt(system: str, user: str) -> str:
+        """qwen ChatML with an assistant turn whose think block is pre-closed."""
+        return (
+            f"<|im_start|>system\n{system.strip()}{STOP}\n"
+            f"<|im_start|>user\n{user.strip()}{STOP}\n"
+            f"<|im_start|>assistant\n<think>\n\n</think>\n\n"
+        )
+
+    # -- raw completion ---------------------------------------------------- #
+    def complete_text(self, system: str, user: str, max_tokens: int = 800) -> str:
+        payload = {
+            "model": self.model,
+            "prompt": self.build_prompt(system, user),
+            "temperature": self.temperature,
+            "max_tokens": max_tokens,
+            "stop": [STOP],
+        }
+        req = urllib.request.Request(
+            f"{self.base_url}/completions",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                body = json.loads(resp.read().decode("utf-8"), strict=False)
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+            raise LocalLLMError(f"local endpoint unreachable at {self.base_url}: {exc}") from exc
+        return (body["choices"][0].get("text") or "").strip()
+
+    # -- json helper ------------------------------------------------------- #
+    def complete_json(
+        self, system: str, user: str, max_tokens: int = 900, retries: int = 2
+    ) -> dict:
+        """Return a parsed JSON object; retry with a firmer nudge on bad output."""
+        sys_prompt = system
+        last_err: Exception | None = None
+        for _ in range(retries + 1):
+            text = self.complete_text(sys_prompt, user, max_tokens=max_tokens)
+            try:
+                return extract_json(text)
+            except (ValueError, json.JSONDecodeError) as exc:
+                last_err = exc
+                sys_prompt = (
+                    f"{system}\n\nReturn ONLY a single valid JSON object, no prose, "
+                    f"no markdown fences."
+                )
+        raise LocalLLMError(f"no valid JSON after {retries + 1} attempts: {last_err}")
+
+
+def extract_json(text: str) -> dict:
+    """Pull the first balanced JSON object out of a model's text output."""
+    s = re.sub(r"```(?:json)?", "", text).replace("```", "").strip()
+    start, end = s.find("{"), s.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError(f"no JSON object found in output: {text[:120]!r}")
+    obj = json.loads(s[start : end + 1])
+    if not isinstance(obj, dict):
+        raise ValueError("parsed JSON is not an object")
+    return obj
