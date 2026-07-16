@@ -9,7 +9,8 @@ reliable):
      the JD's language
   4. assemble the screening payload with STRUCTURE taken   -> titles/companies/dates
      straight from profile.json                              never touched by the model
-  5. render .docx via jobtracker's screening_cv + score coverage
+  5. render .docx via screening_cv and a designed .pdf via interview_cv;
+     score coverage
 
 Honesty is architectural: the model only produces prose. Every employer, role
 title and date comes from profile.json, and one-line roles are passed through
@@ -27,6 +28,7 @@ import settings
 from local_llm import LocalLLM
 
 settings.wire_jobtracker()
+import interview_cv  # noqa: E402  (designed PDF, reused from jobtracker)
 import screening_cv  # noqa: E402  (import after the jobtracker path is wired)
 
 OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
@@ -151,14 +153,32 @@ def build_payload(
     }
 
 
+def _render_pdf(payload: dict, role: dict, out_dir: Path) -> tuple[Path | None, str | None]:
+    """Render the designed interview PDF from the same payload; never raises.
+
+    The PDF is a bonus (needs headless Chrome), so a missing browser or a render
+    failure returns ``(None, reason)`` rather than sinking the whole draft. out_dir
+    is resolved to an absolute path because the renderer builds a file:// URI.
+    """
+    try:
+        pdf = interview_cv.generate_interview_cv(role, screening=payload, out_dir=out_dir.resolve())
+        return pdf, None
+    except Exception as exc:  # noqa: BLE001 - PDF is optional; degrade gracefully
+        return None, str(exc)
+
+
 def draft_screening_cv(
     jd_text: str,
     role_title: str | None = None,
     profile: dict | None = None,
     llm=None,
     out_dir: Path | None = None,
+    render_pdf: bool = True,
 ) -> dict:
-    """Draft + render a screening CV. Returns paths, payload, coverage and keywords."""
+    """Draft + render a screening CV (.docx, and a designed .pdf by default).
+
+    Returns paths, payload, coverage, keywords and the honesty report.
+    """
     profile = profile or screening_cv.load_profile()
     llm = llm or LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
     out_dir = Path(out_dir) if out_dir else OUTPUT_DIR
@@ -168,11 +188,14 @@ def draft_screening_cv(
     report = honesty.verify(payload, profile)  # S3: verify before we render
     role = {"title": role_title or payload["target_title"]}
     docx = screening_cv.generate_screening_cv(role, payload, out_dir=out_dir)
+    pdf, pdf_error = _render_pdf(payload, role, out_dir) if render_pdf else (None, None)
     coverage = screening_cv.keyword_coverage(
         jd_keywords, screening_cv.cv_fulltext(payload, profile)
     )
     return {
         "docx": docx,
+        "pdf": pdf,
+        "pdf_error": pdf_error,
         "payload": payload,
         "jd_keywords": jd_keywords,
         "coverage": coverage,
@@ -189,6 +212,10 @@ def _main(argv: list[str] | None = None) -> int:
     res = draft_screening_cv(jd, role_title=args.title)
     cov, rep = res["coverage"], res["honesty"]
     print(f"saved:    {res['docx']}")
+    if res.get("pdf"):
+        print(f"          {res['pdf']}")
+    elif res.get("pdf_error"):
+        print(f"pdf:      skipped ({res['pdf_error']})")
     print(f"coverage: {cov['pct']}%  ({len(cov['covered'])}/{len(res['jd_keywords'])} keywords)")
     if cov["missing"]:
         print(f"gaps:     {', '.join(cov['missing'])}")

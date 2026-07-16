@@ -43,6 +43,7 @@ def _draft():
         profile=prof,
         llm=FakeLLM(),
         out_dir=out,
+        render_pdf=False,  # unit tests stay Chrome-free; the live test covers the PDF
     )
     return prof, res
 
@@ -93,3 +94,5 @@ def test_live_end_to_end_draft(tmp_path):
     assert res["docx"].exists()
     assert 0 <= res["coverage"]["pct"] <= 100
     assert res["payload"]["summary"]
+    # S5: a designed PDF is produced too (or skipped only if Chrome is absent)
+    assert (res["pdf"] and res["pdf"].exists()) or res["pdf_error"]
