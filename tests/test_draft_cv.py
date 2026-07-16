@@ -52,6 +52,8 @@ def test_renders_docx_and_scores_coverage():
     assert res["docx"].exists() and res["docx"].suffix == ".docx"
     assert set(res["coverage"]) >= {"pct", "covered", "missing"}
     assert isinstance(res["coverage"]["pct"], int)
+    # S3: a draft built from the profile passes the honesty guard cleanly
+    assert res["honesty"].ok and not res["honesty"].errors
 
 
 def test_experience_structure_comes_from_profile_not_model():

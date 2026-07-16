@@ -22,6 +22,7 @@ import argparse
 import sys
 from pathlib import Path
 
+import honesty
 import settings
 from local_llm import LocalLLM
 
@@ -164,6 +165,7 @@ def draft_screening_cv(
 
     jd_keywords = extract_keywords(jd_text, llm)
     payload = build_payload(jd_text, profile, role_title, llm, jd_keywords)
+    report = honesty.verify(payload, profile)  # S3: verify before we render
     role = {"title": role_title or payload["target_title"]}
     docx = screening_cv.generate_screening_cv(role, payload, out_dir=out_dir)
     coverage = screening_cv.keyword_coverage(
@@ -174,6 +176,7 @@ def draft_screening_cv(
         "payload": payload,
         "jd_keywords": jd_keywords,
         "coverage": coverage,
+        "honesty": report,
     }
 
 
@@ -184,11 +187,16 @@ def _main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     jd = sys.stdin.read() if args.jd_file == "-" else Path(args.jd_file).read_text(encoding="utf-8")
     res = draft_screening_cv(jd, role_title=args.title)
-    cov = res["coverage"]
+    cov, rep = res["coverage"], res["honesty"]
     print(f"saved:    {res['docx']}")
     print(f"coverage: {cov['pct']}%  ({len(cov['covered'])}/{len(res['jd_keywords'])} keywords)")
     if cov["missing"]:
         print(f"gaps:     {', '.join(cov['missing'])}")
+    print(f"honesty:  {rep.summary()}")
+    for err in rep.errors:
+        print(f"  ERROR   {err}")
+    for warn in rep.warnings:
+        print(f"  review  {warn}")
     return 0
 
 
