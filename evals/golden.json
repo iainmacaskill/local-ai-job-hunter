@@ -1,0 +1,7 @@
+{
+  "deloitte":     {"title": "Project Manager - AI (Cybersecurity)",        "claude": 100, "note": "Claude promoted the CLS/IBM cyber story hard"},
+  "hsbc":         {"title": "Technical Project Manager (Data & Analytics)", "claude": 94,  "note": "UX is a genuine gap"},
+  "sr2":          {"title": "Scrum Project Manager - Data & AI",            "claude": 100, "note": "pharma is a nice-to-have gap"},
+  "oliver-james": {"title": "Senior Project Manager (AI)",                  "claude": 93,  "note": "no legal-sector experience"},
+  "head-biztech": {"title": "Head of Business Technology (Automation & AI)","claude": 94,  "note": "RPA is a genuine gap"}
+}
