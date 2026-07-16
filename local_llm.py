@@ -52,19 +52,25 @@ class LocalLLM:
 
     # -- prompt build ------------------------------------------------------ #
     @staticmethod
-    def build_prompt(system: str, user: str) -> str:
-        """qwen ChatML with an assistant turn whose think block is pre-closed."""
+    def build_prompt(system: str, user: str, prefill: str = "") -> str:
+        """qwen ChatML with an assistant turn whose think block is pre-closed.
+
+        ``prefill`` seeds the start of the answer (e.g. ``{`` to force JSON), a
+        reliable way to stop a small model wandering into prose on longer tasks.
+        """
         return (
             f"<|im_start|>system\n{system.strip()}{STOP}\n"
             f"<|im_start|>user\n{user.strip()}{STOP}\n"
-            f"<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            f"<|im_start|>assistant\n<think>\n\n</think>\n\n{prefill}"
         )
 
     # -- raw completion ---------------------------------------------------- #
-    def complete_text(self, system: str, user: str, max_tokens: int = 800) -> str:
+    def complete_text(
+        self, system: str, user: str, max_tokens: int = 800, prefill: str = ""
+    ) -> str:
         payload = {
             "model": self.model,
-            "prompt": self.build_prompt(system, user),
+            "prompt": self.build_prompt(system, user, prefill),
             "temperature": self.temperature,
             "max_tokens": max_tokens,
             "stop": [STOP],
@@ -85,19 +91,25 @@ class LocalLLM:
     def complete_json(
         self, system: str, user: str, max_tokens: int = 900, retries: int = 2
     ) -> dict:
-        """Return a parsed JSON object; retry with a firmer nudge on bad output."""
+        """Return a parsed JSON object; prefill ``{`` and retry on bad output.
+
+        The assistant turn is seeded with ``{`` so the model must continue a JSON
+        object rather than drift into prose. Both the raw text and a ``{``-prepended
+        variant are tried, covering models that echo the brace and those that don't.
+        """
         sys_prompt = system
         last_err: Exception | None = None
         for _ in range(retries + 1):
-            text = self.complete_text(sys_prompt, user, max_tokens=max_tokens)
-            try:
-                return extract_json(text)
-            except (ValueError, json.JSONDecodeError) as exc:
-                last_err = exc
-                sys_prompt = (
-                    f"{system}\n\nReturn ONLY a single valid JSON object, no prose, "
-                    f"no markdown fences."
-                )
+            text = self.complete_text(sys_prompt, user, max_tokens=max_tokens, prefill="{")
+            for candidate in (text, "{" + text):
+                try:
+                    return extract_json(candidate)
+                except (ValueError, json.JSONDecodeError) as exc:
+                    last_err = exc
+            sys_prompt = (
+                f"{system}\n\nReturn ONLY a single valid JSON object, no prose, "
+                f"no markdown fences."
+            )
         raise LocalLLMError(f"no valid JSON after {retries + 1} attempts: {last_err}")
 
 

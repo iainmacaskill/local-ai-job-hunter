@@ -120,3 +120,18 @@ def verify(payload: dict, profile: dict) -> HonestyReport:
         warnings.append("em dash present (house style: use none)")
 
     return HonestyReport(ok=not errors, errors=errors, warnings=warnings)
+
+
+def verify_text(text: str, profile: dict, what: str = "text") -> HonestyReport:
+    """Guard free prose (e.g. a cover letter) that has no structure to verify.
+
+    Only figure and style checks apply: any number not present anywhere in the
+    profile is flagged for review, as are em dashes. Warnings only, never a block.
+    """
+    warnings: list[str] = []
+    allowed = _profile_numbers(profile)
+    for num in _numbers(text) - allowed:
+        warnings.append(f"unverified figure {num!r} in {what}")
+    if EM_DASH in (text or ""):
+        warnings.append(f"em dash present in {what} (house style: use none)")
+    return HonestyReport(ok=True, warnings=warnings)

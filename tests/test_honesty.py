@@ -1,6 +1,6 @@
 import copy
 
-from honesty import verify
+from honesty import verify, verify_text
 
 PROFILE = {
     "jobs": [
@@ -73,4 +73,15 @@ def test_em_dash_is_flagged():
     p = copy.deepcopy(CLEAN)
     p["summary"] = "Delivery lead — regulated environments."
     r = verify(p, PROFILE)
+    assert any("em dash" in w for w in r.warnings)
+
+
+def test_verify_text_clean_prose_passes():
+    r = verify_text("Delivered a 15 million record migration and cut defects 30%.", PROFILE)
+    assert r.ok and not r.warnings
+
+
+def test_verify_text_flags_fake_figure_and_em_dash():
+    r = verify_text("Saved the client 40% in year one — every quarter.", PROFILE)
+    assert any("40%" in w for w in r.warnings)
     assert any("em dash" in w for w in r.warnings)
