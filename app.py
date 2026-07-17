@@ -1,4 +1,4 @@
-"""cv-drafter-local tracker (Phase B) — a local dashboard of the roles you pursue.
+"""Local Job Hunter's tracker — a local dashboard of the roles you pursue.
 
 Add roles (with the pasted job description), edit them inline, watch the pipeline
 metrics, and draft the CV/cover letter for a role straight from its row using the

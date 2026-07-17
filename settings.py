@@ -1,4 +1,4 @@
-"""Runtime configuration for cv-drafter-local.
+"""Runtime configuration for Local Job Hunter.
 
 Loads a gitignored ``.env`` (if present) and then the local-LLM endpoint defaults.
 Override anything via a real environment variable or a line in ``.env`` — for the
