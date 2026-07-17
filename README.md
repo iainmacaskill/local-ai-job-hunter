@@ -13,9 +13,10 @@ advert's language. Most people either send the same CV everywhere, or paste thei
 career history into an online AI tool and hope for the best. This tool takes a
 different path:
 
-1. **It finds roles.** It searches Reed and Adzuna (using their free, official
-   interfaces, no scraping) and files new, relevant roles on a simple board. Roles
-   you have already seen, and roles needing security clearance, are skipped.
+1. **It finds roles.** It searches Adzuna and Reed (using their free, official
+   interfaces, no scraping) and files new, relevant roles on a simple board.
+   Roles you have already seen, duplicate re-posts of the same vacancy, and roles
+   needing security clearance are all skipped.
 2. **You decide.** Each role arrives as *Found*. Read the advert and either *Pass*
    or set it to *Draft CV*. Tidying is bulk-friendly: tick rows and press delete to
    archive them (reversible, and a search never re-adds an archived role).
@@ -130,15 +131,17 @@ The interview PDF also needs Chrome or Chromium installed. A different endpoint 
 model can be set with the `CVDRAFTER_LLM_URL` / `CVDRAFTER_LLM_MODEL` variables
 (for example Ollama on `:11434`).
 
-**3. The job search (optional).** Get free keys from
-[reed.co.uk/developers](https://www.reed.co.uk/developers) and/or
-[developer.adzuna.com](https://developer.adzuna.com), and put them in a gitignored
-`.env` file in the repo root:
+**3. The job search (optional).** Get a free Adzuna app id and key from
+[developer.adzuna.com](https://developer.adzuna.com) (issued instantly; this is the
+default source) and put them in a gitignored `.env` file in the repo root. A
+[Reed](https://www.reed.co.uk/developers) key is a worthwhile extra when it arrives
+(it can take a while): Reed returns the full job description rather than a snippet.
+The tool works fine with Adzuna alone.
 
 ```
-REED_API_KEY=your-key
 ADZUNA_APP_ID=your-id
 ADZUNA_APP_KEY=your-key
+REED_API_KEY=your-key
 ```
 
 **4. Use it.** Start the tracker and work from the board: find roles, triage them,
@@ -193,11 +196,12 @@ The full benchmark write-up is in [`evals/RESULTS.md`](evals/RESULTS.md).
 
 - **Drafting** (screening CV, interview PDF, cover letter): done.
 - **Tracking** (a local board: Found, Pass, Draft CV, Applied): done.
-- **Active hunt** (find roles from the free Reed and Adzuna APIs, deduplicated and
-  relevance-filtered): done.
+- **Active hunt** (find roles from the free Adzuna and Reed APIs, relevance-filtered,
+  with fuzzy de-duplication of agency re-posts): done.
+- **Board upkeep** (bulk archive with restore, follow-up nudges two working days
+  after applying, with drafts that open in your own email app): done.
 
-Next: sharper sweep relevance (fuzzy de-duplication of agency re-posts), delete and
-archive on the board, and saved searches.
+Next: saved searches, so a repeat sweep is one click.
 
 ## License
 

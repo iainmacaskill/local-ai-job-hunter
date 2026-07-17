@@ -208,7 +208,7 @@ def _main(argv: list[str] | None = None) -> int:
 
     settings.load_env()  # pick up REED_API_KEY / ADZUNA_APP_ID+KEY from a .env
     ap = argparse.ArgumentParser(description="Sweep a job board into the local tracker.")
-    ap.add_argument("--source", choices=["reed", "adzuna"], default="reed")
+    ap.add_argument("--source", choices=["adzuna", "reed"], default="adzuna")
     ap.add_argument("--dedupe-board", action="store_true",
                     help="archive fuzzy duplicate re-posts already on the board, then exit")
     ap.add_argument("--keywords", action="append",

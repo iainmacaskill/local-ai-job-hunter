@@ -24,7 +24,8 @@ import tracker_draft
 from cv_profile import load_profile
 from local_llm import LocalLLM
 
-SOURCES = {"Reed": reed, "Adzuna": adzuna}
+# Adzuna first: its keys are issued instantly, so it is the default source.
+SOURCES = {"Adzuna": adzuna, "Reed": reed}
 
 st.set_page_config(page_title="CV Drafter — Tracker", page_icon="📋", layout="wide")
 
