@@ -120,6 +120,47 @@ def test_sweep_filters_off_target_titles(tmp_path, monkeypatch):
     assert summary["skipped_irrelevant"] == 2
 
 
+def test_is_duplicate_matches_reposts_conservatively():
+    dup = hunt.is_duplicate
+    # Employer spelling variants and legal suffixes collapse.
+    assert dup("Agentic AI Ops Lead", "JPMorganChase", "Agentic AI Ops Lead", "J.P. Morgan")
+    assert dup("Programme Manager", "Linear Executive Search",
+               "Programme Manager", "Linear Executive Search Limited")
+    assert dup("PM - AI (12 month FTC)", "TechUK", "PM - AI (12 month FTC)", "techUK")
+    # Distinct roles are never merged.
+    assert not dup("Programme Manager", "Fincroft", "Programme Manager", "La Fosse")
+    assert not dup("Programme Manager", "Acme", "Senior Programme Manager", "Acme")
+    assert not dup("Programme Manager", "", "Programme Manager", "")   # unknown employers
+    assert not dup("Programme Manager", "Reed", "Programme Manager", "Reel")  # short stems
+
+
+def test_sweep_skips_fuzzy_duplicate_reposts(tmp_path, monkeypatch):
+    conn = _db(tmp_path)
+    tracker_db.add_role(conn, title="AI Delivery Manager", company="J.P. Morgan",
+                        source_job_id="900")
+    _patch_reed(monkeypatch, [
+        _role("111", company="JPMorganChase"),          # re-post of the tracked role
+        _role("222", company="JPMorganChase"),          # re-post within the run of 111
+        _role("333", company="Distinct Corp"),          # same title, different employer
+    ])
+    summary = hunt.sweep(conn, [{"keywords": "x"}])
+    assert summary["skipped_duplicate"] == 2
+    assert [a["company"] for a in summary["added"]] == ["Distinct Corp"]
+
+
+def test_dedupe_board_archives_newer_copies_keeps_oldest(tmp_path):
+    conn = _db(tmp_path)
+    first = tracker_db.add_role(conn, title="PM - AI (12 month FTC)", company="TechUK")
+    second = tracker_db.add_role(conn, title="PM - AI (12 month FTC)", company="techUK")
+    third = tracker_db.add_role(conn, title="PM - AI (12 month FTC)", company="techUK")
+    other = tracker_db.add_role(conn, title="PM - AI (12 month FTC)", company="Other Org")
+    archived = hunt.dedupe_board(conn)
+    assert sorted(r["id"] for r in archived) == [second, third]
+    active_ids = {r["id"] for r in tracker_db.list_roles(conn)}
+    assert active_ids == {first, other}                     # earliest + distinct survive
+    assert {r["id"] for r in tracker_db.list_archived(conn)} == {second, third}
+
+
 def test_init_db_migrates_source_job_id_onto_old_table(tmp_path):
     # An older tracker.db created before source_job_id existed.
     conn = tracker_db.connect(tmp_path / "old.db")

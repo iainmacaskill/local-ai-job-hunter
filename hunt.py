@@ -40,6 +40,74 @@ def _needs_clearance(*texts: str) -> bool:
     return any(term in blob for term in CLEARANCE_TERMS)
 
 
+# --- fuzzy duplicate detection (agency re-posts) ---------------------------- #
+# The same vacancy often arrives several times: posted by multiple agencies, or
+# with the employer spelled differently ("J.P. Morgan" vs "JPMorganChase"). The
+# rule here is deliberately conservative: titles must match exactly after
+# normalisation, and companies must match after normalisation (or one be a prefix
+# of the other), so distinct roles are never silently merged.
+
+_COMPANY_SUFFIXES = ("ltd", "limited", "plc", "llp", "llc", "inc", "uk")
+_MIN_PREFIX_LEN = 5  # avoid merging on very short company stems
+
+
+def _norm_title(s: str | None) -> str:
+    return " ".join(re.sub(r"[^a-z0-9&+ ]+", " ", (s or "").lower()).split())
+
+
+def _norm_company(s: str | None) -> str:
+    stem = re.sub(r"[^a-z0-9]+", "", (s or "").lower())
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _COMPANY_SUFFIXES:
+            if stem.endswith(suffix) and len(stem) > len(suffix):
+                stem = stem[: -len(suffix)]
+                changed = True
+    return stem
+
+
+def _same_company(a: str | None, b: str | None) -> bool:
+    na, nb = _norm_company(a), _norm_company(b)
+    if not na or not nb:
+        return False  # unknown employers are never merged
+    if na == nb:
+        return True
+    shorter, longer = sorted((na, nb), key=len)
+    return len(shorter) >= _MIN_PREFIX_LEN and longer.startswith(shorter)
+
+
+def is_duplicate(title_a, company_a, title_b, company_b) -> bool:
+    """True when two postings look like the same vacancy re-posted."""
+    ta, tb = _norm_title(title_a), _norm_title(title_b)
+    return bool(ta) and ta == tb and _same_company(company_a, company_b)
+
+
+def dedupe_board(conn) -> list[dict]:
+    """Archive fuzzy duplicates already on the board; keep the earliest of each.
+
+    Reversible by design: duplicates are archived (Archive panel restores them),
+    never deleted. Returns the archived roles as ``[{"id", "title", "company"}]``.
+    """
+    active = sorted(tracker_db.list_roles(conn), key=lambda r: r["id"])  # oldest first
+    keepers: list[dict] = []
+    archived: list[dict] = []
+    for role in active:
+        dup_of = next(
+            (k for k in keepers
+             if is_duplicate(role["title"], role.get("company"),
+                             k["title"], k.get("company"))),
+            None,
+        )
+        if dup_of is None:
+            keepers.append(role)
+        else:
+            archived.append({"id": role["id"], "title": role["title"],
+                             "company": role.get("company")})
+    tracker_db.archive_roles(conn, [r["id"] for r in archived])
+    return archived
+
+
 def _title_relevant(title: str, terms) -> bool:
     low = (title or "").lower()
     for t in terms:
@@ -70,12 +138,15 @@ def sweep(
     tracked = tracker_db.list_roles(conn, include_archived=True)
     seen_ids = {r["source_job_id"] for r in tracked if r.get("source_job_id")}
     seen_links = {r["link"] for r in tracked if r.get("link")}
+    # Fuzzy re-post detection: postings already known (tracked or added this run).
+    seen_postings = [(r["title"], r.get("company")) for r in tracked]
     source_name = getattr(source, "__name__", "job").split(".")[-1].title()
 
     added: list[dict] = []
     skipped_seen = 0
     skipped_clearance = 0
     skipped_irrelevant = 0
+    skipped_duplicate = 0
     handled: set[str] = set()  # dedupe within this run (a role can hit several searches)
 
     for s in searches:
@@ -87,6 +158,10 @@ def sweep(
 
             if title_terms and not _title_relevant(role.title, title_terms):
                 skipped_irrelevant += 1
+                continue
+
+            if any(is_duplicate(role.title, role.company, t, c) for t, c in seen_postings):
+                skipped_duplicate += 1
                 continue
 
             jd = role.description
@@ -114,12 +189,14 @@ def sweep(
                 status="Found",
             )
             added.append({"id": rid, "title": role.title, "company": role.company})
+            seen_postings.append((role.title, role.company))
 
     return {
         "added": added,
         "skipped_seen": skipped_seen,
         "skipped_clearance": skipped_clearance,
         "skipped_irrelevant": skipped_irrelevant,
+        "skipped_duplicate": skipped_duplicate,
     }
 
 
@@ -132,7 +209,9 @@ def _main(argv: list[str] | None = None) -> int:
     settings.load_env()  # pick up REED_API_KEY / ADZUNA_APP_ID+KEY from a .env
     ap = argparse.ArgumentParser(description="Sweep a job board into the local tracker.")
     ap.add_argument("--source", choices=["reed", "adzuna"], default="reed")
-    ap.add_argument("--keywords", required=True, action="append",
+    ap.add_argument("--dedupe-board", action="store_true",
+                    help="archive fuzzy duplicate re-posts already on the board, then exit")
+    ap.add_argument("--keywords", action="append",
                     help="search term; repeat for several (e.g. --keywords a --keywords b)")
     ap.add_argument("--location", default=None)
     ap.add_argument("--distance", type=int, default=10, help="miles from --location")
@@ -142,6 +221,17 @@ def _main(argv: list[str] | None = None) -> int:
     ap.add_argument("--all-titles", action="store_true",
                     help="keep every result (skip the title-relevance filter)")
     args = ap.parse_args(argv)
+
+    if args.dedupe_board:
+        conn = tracker_db.connect()
+        tracker_db.init_db(conn)
+        archived = dedupe_board(conn)
+        print(f"archived:  {len(archived)} duplicate re-post(s) (restore from the Archive panel)")
+        for r in archived:
+            print(f"  - {r['title']}, {r['company']}")
+        return 0
+    if not args.keywords:
+        ap.error("--keywords is required (unless using --dedupe-board)")
 
     source = importlib.import_module(args.source)  # reed or adzuna
     common = {
@@ -165,6 +255,7 @@ def _main(argv: list[str] | None = None) -> int:
     for role in summary["added"]:
         print(f"  + {role['title']}, {role['company']}")
     print(f"skipped:   {summary['skipped_seen']} already tracked, "
+          f"{summary['skipped_duplicate']} duplicate re-posts, "
           f"{summary['skipped_irrelevant']} off-target titles, "
           f"{summary['skipped_clearance']} needing clearance")
     return 0

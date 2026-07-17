@@ -101,6 +101,7 @@ def _find_roles(conn) -> None:
             st.success(
                 f"Added {len(summary['added'])} new role(s). Skipped "
                 f"{summary['skipped_seen']} already tracked, "
+                f"{summary['skipped_duplicate']} duplicate re-posts, "
                 f"{summary['skipped_irrelevant']} off-target titles, "
                 f"{summary['skipped_clearance']} needing clearance."
             )
@@ -395,6 +396,18 @@ else:
             "fit_notes": st.column_config.TextColumn("Fit notes", width="large"),
         },
     )
+    if st.button(
+        "🧹 Archive duplicate re-posts",
+        help="Same vacancy posted again (by another agency, or with the employer "
+             "spelled differently). Keeps the earliest; archiving is reversible below.",
+    ):
+        archived = hunt.dedupe_board(conn)
+        if archived:
+            st.toast(f"Archived {len(archived)} duplicate(s). Restore from the Archive panel.")
+        else:
+            st.toast("No duplicates found.")
+        st.rerun()
+
     _draft_queue(conn, roles)
     _followups_due(conn, due)
 
