@@ -1,4 +1,4 @@
-"""Runtime configuration for Local Job Hunter.
+"""Runtime configuration for Local AI Job Hunter.
 
 Loads a gitignored ``.env`` (if present) and then the local-LLM endpoint defaults.
 Override anything via a real environment variable or a line in ``.env`` — for the

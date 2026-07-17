@@ -1,4 +1,4 @@
-# Local Job Hunter
+# Local AI Job Hunter
 
 **A free job-hunt assistant that lives on your own computer. It finds roles, tracks
 your applications, and uses AI to draft tailored, honest CVs, with no subscription
@@ -109,8 +109,8 @@ and start the local server on port `1234` (Developer tab).
 **2. The tool.**
 
 ```bash
-git clone https://github.com/iainmacaskill/local-job-hunter
-cd local-job-hunter
+git clone https://github.com/iainmacaskill/local-ai-job-hunter
+cd local-ai-job-hunter
 python3 -m venv .venv
 ./.venv/bin/pip install -r requirements.txt -r requirements-dev.txt
 cp profile.example.json profile.json   # then fill in YOUR career facts (gitignored)
