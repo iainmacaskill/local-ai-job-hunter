@@ -1,12 +1,13 @@
 # cv-drafter-local
 
-**A CV and cover-letter drafter that runs entirely on your own machine, for free,
-and refuses to lie about your experience.**
+**A local, free job-hunt tool that tracks the roles you are chasing and drafts
+honest, tailored CVs for them, refusing to invent experience you do not have.**
 
 You paste a job advert; it drafts a keyword-tuned **screening CV** (`.docx`), a
 designed **interview CV** (`.pdf`) and a matching **cover letter**, in your house
 style, using only facts from your own profile, and it tells you where you genuinely
-fall short of the advert instead of papering over it.
+fall short of the advert instead of papering over it. A local **tracker** keeps the
+roles you are pursuing in one place and lets you draft straight from a row.
 
 Three things make it different from the flood of AI CV tools:
 
@@ -86,15 +87,37 @@ frontier model (63% to 100% run to run), so it is best treated as a **fast, free
 honest first draft that you review and polish**, not a replacement for a final human
 pass on a role that really matters.
 
+## Tracker
+
+The roles you are chasing live in a local dashboard (Streamlit), so drafting is part
+of a loop rather than a one-off command:
+
+```bash
+./.venv/bin/streamlit run app.py
+```
+
+- **Add a role** with its advert, and it is stored locally (a SQLite file that is
+  gitignored, like your profile).
+- **Move it through the pipeline** (Found, Applied, Interview, Offer and so on) by
+  editing the status in the grid, with a metrics row (active, applied, interviewing,
+  offers) and a status filter across the top.
+- **Draft from the row.** Set a role's status to *Draft CV* or *Draft CV & Cover
+  Letter* and it joins a "to draft" queue; one click runs the same local drafters,
+  records the coverage and honesty result on the row, and gives you the finished
+  files to download.
+
+Nothing here talks to the internet: the tracker, the model and your files all stay on
+your machine.
+
 ## Built by directing an AI agent
 
 This is also a small proof of a bigger idea. It was built by an agile delivery
 manager, not a professional software engineer, by pair-programming with an AI coding
 agent (Claude Code), one small user story at a time. The result is not a throwaway
-script: it ships with 31 tests, a linter, an honesty guard and a reproducible eval.
-Modern agentic tooling now lets someone who understands the *problem* deliver a real,
-tested, zero-running-cost product without a dev team. That is the part I find most
-interesting, and the reason it is public.
+script: it ships with a 40-plus test suite, a linter, an honesty guard and a
+reproducible eval. Modern agentic tooling now lets someone who understands the
+*problem* deliver a real, tested, zero-running-cost product without a dev team. That
+is the part I find most interesting, and the reason it is public.
 
 ## Quick start
 
@@ -115,6 +138,8 @@ Chromium. Point at a different endpoint or model with the `CVDRAFTER_LLM_URL` /
 `CVDRAFTER_LLM_MODEL` env vars (for example Ollama on `:11434`).
 
 ## Use
+
+For a one-off draft you can skip the tracker and go straight to the command line:
 
 ```bash
 # copy a job advert to the clipboard, then:
@@ -144,6 +169,9 @@ Everything the tool needs lives in this repo; it stands alone:
 - `cv_profile.py`: loads and locates your `profile.json`.
 - `honesty.py`: the verification guard.
 - `local_llm.py` / `settings.py`: the local-model client and endpoint config.
+- `app.py`: the local **tracker** dashboard (Streamlit).
+- `tracker_db.py`: the local SQLite store of roles and the pipeline metrics.
+- `tracker_draft.py`: drafts the CV/cover letter for a tracked role and records the result.
 
 **The local-model trick.** `qwen3.6-27b` in LM Studio is a reasoning model that
 ignores the usual API thinking switches (`/no_think`, `enable_thinking:false`,
@@ -164,9 +192,11 @@ a JSON object rather than drift into prose.
 
 ## Roadmap
 
-Phase 1 (this repo): **drafting**, complete. Later phases, in priority order:
-**tracking** (a local dashboard of the roles you are pursuing), then **board
-scraping** (which also unlocks fetching a JD straight from a link).
+- **Drafting** (screening CV, interview PDF, cover letter): done.
+- **Tracking** (a local dashboard of the roles you are pursuing, drafting straight
+  from a row): done.
+- **Active hunt** is next: pulling roles in from job boards, which also unlocks
+  fetching a job description straight from a link.
 
 ## License
 

@@ -62,6 +62,14 @@ def test_draft_cv_and_cover_stamps_both(tmp_path):
     assert saved["cover_file"] and saved["cover_file"].endswith(".docx")
 
 
+def test_queue_and_settle_statuses_are_valid_pipeline_statuses():
+    """The queue triggers and the settle target must be real pipeline statuses,
+    or the tracker would offer a status the drafter can never clear."""
+    for s in tracker_draft.CV_QUEUE_STATUSES:
+        assert s in tracker_db.STATUSES
+    assert "CV Drafted" in tracker_db.STATUSES
+
+
 def test_draft_without_jd_raises(tmp_path):
     conn = tracker_db.connect(tmp_path / "t.db")
     tracker_db.init_db(conn)
