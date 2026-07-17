@@ -13,7 +13,7 @@ import draft_cv
 import tracker_db
 
 # Statuses the tracker uses as a "please draft this" trigger.
-CV_QUEUE_STATUSES = ("Draft CV", "Draft CV & Cover Letter")
+CV_QUEUE_STATUSES = tracker_db.DRAFT_STATUSES
 
 
 def draft_for_role(conn, role: dict, llm=None, out_dir=None, render_pdf: bool = True) -> dict:
@@ -21,9 +21,11 @@ def draft_for_role(conn, role: dict, llm=None, out_dir=None, render_pdf: bool = 
 
     Reads ``role['jd_text']``, drafts the screening CV (and a designed PDF), plus a
     cover letter when the role's status is 'Draft CV & Cover Letter'. Records
-    ``cv_file`` / ``cover_file`` / ``coverage`` on the role and moves it to
-    'CV Drafted'. Returns ``{"cv": <draft_cv result>, "cover": <draft_cover result or
-    None>}``. Raises ``ValueError`` if the role has no saved job description.
+    ``cv_file`` / ``cover_file`` / ``coverage`` on the role; the status is left as the
+    draft trigger (the filled-in CV file is what drops it out of the "to draft" queue,
+    and you move it to 'Applied' yourself). Returns ``{"cv": <draft_cv result>,
+    "cover": <draft_cover result or None>}``. Raises ``ValueError`` if no job
+    description is saved.
     """
     jd = (role.get("jd_text") or "").strip()
     if not jd:
@@ -37,7 +39,6 @@ def draft_for_role(conn, role: dict, llm=None, out_dir=None, render_pdf: bool = 
     fields = {
         "cv_file": cv["docx"].name,
         "coverage": cv["coverage"]["pct"],
-        "status": "CV Drafted",
     }
     cover_res = None
     if cover:

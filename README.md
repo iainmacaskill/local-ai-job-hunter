@@ -100,9 +100,11 @@ of a loop rather than a one-off command:
 
 - **Add a role** with its advert, and it is stored locally (a SQLite file that is
   gitignored, like your profile).
-- **Move it through the pipeline** (Found, Applied, Interview, Offer and so on) by
-  editing the status in the grid, with a metrics row (active, applied, interviewing,
-  offers) and a status filter across the top.
+- **Move it through the funnel** by editing the status in the grid: *Found* (new,
+  read the advert and decide) to *Pass* (not pursuing) or *Applied*, with a metrics
+  row (to triage, pursuing, applied, passed) and a status filter across the top. It
+  is a search-and-application tracker: once you have applied, the recruiter
+  relationship is yours to run, off-tool.
 - **Draft from the row.** Set a role's status to *Draft CV* or *Draft CV & Cover
   Letter* and it joins a "to draft" queue; one click runs the same local drafters,
   records the coverage and honesty result on the row, and gives you the finished

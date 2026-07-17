@@ -18,18 +18,16 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("CVDRAFTER_DB", REPO / "tracker.db"))
 
-# Pipeline statuses. "Draft CV" / "Draft CV & Cover Letter" are one-shot action
-# triggers (B4): setting one on a role drafts the document(s), then the row settles
-# to "CV Drafted". The rest are the stages a role moves through by hand.
-STATUSES = [
-    "Found", "Draft CV", "Draft CV & Cover Letter", "CV Drafted",
-    "Applied", "Interview", "Offer", "Rejected", "Expired",
-]
+# Search-and-application statuses, in order. This tool tracks the front of the funnel
+# (find, decide, draft, apply) and hands off after "Applied": interviews, offers and
+# outcomes are a human relationship with the recruiter, managed off-tool.
+# "Draft CV" / "Draft CV & Cover Letter" also trigger drafting: while a role has one of
+# these and no CV yet it sits in the "to draft" queue; drafting fills in the CV file and
+# the role stays put until you move it to "Applied".
+STATUSES = ["Found", "Pass", "Draft CV", "Draft CV & Cover Letter", "Applied"]
 
-# For the dashboard metrics: closed roles are out of play; the funnel is the set of
-# roles you have actually submitted (applied and everything downstream).
-CLOSED = {"Rejected", "Expired"}
-IN_FUNNEL = {"Applied", "Interview", "Offer"}
+# The two statuses that mean "pursuing this role, draft its documents".
+DRAFT_STATUSES = ("Draft CV", "Draft CV & Cover Letter")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS roles (
@@ -86,9 +84,26 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
             conn.execute(f"ALTER TABLE roles ADD COLUMN {col} {ddl}")
 
 
+# Statuses from the old (pre-slim) pipeline mapped onto the current set, so a DB from
+# an earlier version never holds a value that has since been retired.
+_LEGACY_STATUS = {
+    "CV Drafted": "Draft CV",   # it was drafted; keep it in the pursuing state
+    "Interview": "Applied",
+    "Offer": "Applied",
+    "Rejected": "Pass",
+    "Expired": "Pass",
+}
+
+
+def _migrate_statuses(conn: sqlite3.Connection) -> None:
+    for old, new in _LEGACY_STATUS.items():
+        conn.execute("UPDATE roles SET status = ? WHERE status = ?", (new, old))
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     _ensure_columns(conn)  # migrate DBs created before a column was added
+    _migrate_statuses(conn)  # map any retired status values onto the current set
     conn.execute("CREATE INDEX IF NOT EXISTS idx_roles_source_job_id ON roles(source_job_id)")
     conn.commit()
 
@@ -133,14 +148,14 @@ def update_role(conn: sqlite3.Connection, role_id: int, **fields) -> None:
 
 
 def summarise(roles) -> dict:
-    """Dashboard counts for a role list: total, active, and the applied funnel."""
+    """Dashboard counts for the search funnel: to-triage, pursuing, applied, passed."""
     statuses = [(r.get("status") or "") for r in roles]
     return {
         "total": len(statuses),
-        "active": sum(s not in CLOSED for s in statuses),
-        "applied": sum(s in IN_FUNNEL for s in statuses),
-        "interviewing": sum(s == "Interview" for s in statuses),
-        "offers": sum(s == "Offer" for s in statuses),
+        "to_triage": sum(s == "Found" for s in statuses),
+        "pursuing": sum(s in DRAFT_STATUSES for s in statuses),
+        "applied": sum(s == "Applied" for s in statuses),
+        "passed": sum(s == "Pass" for s in statuses),
     }
 
 

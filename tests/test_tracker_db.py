@@ -76,9 +76,9 @@ def test_apply_editor_changes_respects_a_filtered_id_list(tmp_path):
     tracker_db.add_role(conn, title="Hidden")
     keep = tracker_db.add_role(conn, title="Shown")
     # As if the grid were filtered to a single row: only `keep` is displayed at index 0.
-    n = tracker_db.apply_editor_changes(conn, [keep], {"0": {"status": "Interview"}})
+    n = tracker_db.apply_editor_changes(conn, [keep], {"0": {"status": "Pass"}})
     assert n == 1
-    assert tracker_db.get_role(conn, keep)["status"] == "Interview"
+    assert tracker_db.get_role(conn, keep)["status"] == "Pass"
 
 
 def test_apply_editor_changes_ignores_unknown_columns_and_empty(tmp_path):
@@ -91,17 +91,32 @@ def test_apply_editor_changes_ignores_unknown_columns_and_empty(tmp_path):
     assert tracker_db.get_role(conn, rid)["status"] == "Found"
 
 
-def test_summarise_counts_active_and_funnel(tmp_path):
+def test_summarise_counts_the_search_funnel(tmp_path):
     conn = _db(tmp_path)
     for title, status in [
-        ("a", "Found"), ("b", "Applied"), ("c", "Interview"),
-        ("d", "Offer"), ("e", "Rejected"), ("f", "Expired"),
+        ("a", "Found"), ("b", "Found"), ("c", "Draft CV"),
+        ("d", "Draft CV & Cover Letter"), ("e", "Applied"), ("f", "Pass"),
     ]:
         rid = tracker_db.add_role(conn, title=title)
         tracker_db.update_role(conn, rid, status=status)
     m = tracker_db.summarise(tracker_db.list_roles(conn))
     assert m["total"] == 6
-    assert m["active"] == 4          # all but Rejected + Expired
-    assert m["applied"] == 3         # Applied + Interview + Offer
-    assert m["interviewing"] == 1    # Interview
-    assert m["offers"] == 1          # Offer
+    assert m["to_triage"] == 2       # two Found
+    assert m["pursuing"] == 2        # Draft CV + Draft CV & Cover Letter
+    assert m["applied"] == 1         # Applied
+    assert m["passed"] == 1          # Pass
+
+
+def test_init_db_migrates_retired_statuses(tmp_path):
+    conn = _db(tmp_path)
+    # Rows left on old (pre-slim) statuses, then re-init to migrate them.
+    for status in ("Expired", "Rejected", "Interview", "Offer", "CV Drafted"):
+        rid = tracker_db.add_role(conn, title=status)
+        conn.execute("UPDATE roles SET status = ? WHERE id = ?", (status, rid))
+    conn.commit()
+    tracker_db.init_db(conn)
+    live = {(r["title"], r["status"]) for r in tracker_db.list_roles(conn)}
+    assert ("Expired", "Pass") in live and ("Rejected", "Pass") in live
+    assert ("Interview", "Applied") in live and ("Offer", "Applied") in live
+    assert ("CV Drafted", "Draft CV") in live
+    assert all(r["status"] in tracker_db.STATUSES for r in tracker_db.list_roles(conn))

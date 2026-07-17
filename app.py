@@ -158,10 +158,10 @@ def _persist_grid_edits() -> None:
 def _metrics_row(roles) -> None:
     m = tracker_db.summarise(roles)
     c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Active", m["active"], help="Roles not rejected or expired")
-    c2.metric("Applied", m["applied"], help="Applied, interviewing or offered")
-    c3.metric("Interviewing", m["interviewing"])
-    c4.metric("Offers", m["offers"])
+    c1.metric("To triage", m["to_triage"], help="Found, not yet reviewed")
+    c2.metric("Pursuing", m["pursuing"], help="Drafting a CV / cover letter")
+    c3.metric("Applied", m["applied"])
+    c4.metric("Passed", m["passed"])
 
 
 def _download(col, path, label) -> None:
@@ -191,8 +191,11 @@ def _latest_draft_panel() -> None:
 
 
 def _draft_queue(conn, roles) -> None:
-    """Roles queued for drafting (status 'Draft CV' / '... & Cover Letter')."""
-    queued = [r for r in roles if (r["status"] or "") in tracker_draft.CV_QUEUE_STATUSES]
+    """Roles queued for drafting: a draft status, and no CV drafted yet."""
+    queued = [
+        r for r in roles
+        if (r["status"] or "") in tracker_draft.CV_QUEUE_STATUSES and not r.get("cv_file")
+    ]
     if not queued:
         return
     st.subheader(f"✍️ To draft ({len(queued)})")

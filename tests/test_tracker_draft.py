@@ -39,13 +39,13 @@ def _queued_role(tmp_path, status):
     return conn, tracker_db.get_role(conn, rid)
 
 
-def test_draft_cv_only_stamps_row_and_settles(tmp_path):
+def test_draft_cv_only_stamps_the_row(tmp_path):
     conn, role = _queued_role(tmp_path, "Draft CV")
     out = tracker_draft.draft_for_role(conn, role, llm=FakeLLM(), out_dir=tmp_path,
                                        render_pdf=False)
     assert out["cover"] is None
     saved = tracker_db.get_role(conn, role["id"])
-    assert saved["status"] == "CV Drafted"
+    assert saved["status"] == "Draft CV"      # unchanged; the CV file is what settles it
     assert saved["cv_file"] and saved["cv_file"].endswith(".docx")
     assert isinstance(saved["coverage"], int) and 0 <= saved["coverage"] <= 100
     assert saved["cover_file"] is None
@@ -58,16 +58,15 @@ def test_draft_cv_and_cover_stamps_both(tmp_path):
                                        render_pdf=False)
     assert out["cover"] is not None and out["cover"]["docx"].exists()
     saved = tracker_db.get_role(conn, role["id"])
-    assert saved["status"] == "CV Drafted"
+    assert saved["status"] == "Draft CV & Cover Letter"   # unchanged
     assert saved["cover_file"] and saved["cover_file"].endswith(".docx")
 
 
-def test_queue_and_settle_statuses_are_valid_pipeline_statuses():
-    """The queue triggers and the settle target must be real pipeline statuses,
-    or the tracker would offer a status the drafter can never clear."""
+def test_queue_statuses_are_valid():
+    """The draft-queue triggers must be real statuses, or the tracker would offer a
+    status the drafter never acts on."""
     for s in tracker_draft.CV_QUEUE_STATUSES:
         assert s in tracker_db.STATUSES
-    assert "CV Drafted" in tracker_db.STATUSES
 
 
 def test_draft_without_jd_raises(tmp_path):
