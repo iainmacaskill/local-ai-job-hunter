@@ -20,7 +20,7 @@ import re
 import socket
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 DEFAULT_BASE_URL = "http://localhost:1234/v1"
@@ -38,6 +38,10 @@ class LocalLLM:
     model: str = DEFAULT_MODEL
     timeout: int = 180
     temperature: float = 0.0
+    # JSON-reliability counters, reported by the eval when comparing models.
+    stats: dict = field(
+        default_factory=lambda: {"json_calls": 0, "json_retries": 0, "json_failures": 0}
+    )
 
     # -- connectivity ------------------------------------------------------ #
     def is_up(self, connect_timeout: float = 1.5) -> bool:
@@ -97,9 +101,12 @@ class LocalLLM:
         object rather than drift into prose. Both the raw text and a ``{``-prepended
         variant are tried, covering models that echo the brace and those that don't.
         """
+        self.stats["json_calls"] += 1
         sys_prompt = system
         last_err: Exception | None = None
-        for _ in range(retries + 1):
+        for attempt in range(retries + 1):
+            if attempt:
+                self.stats["json_retries"] += 1
             text = self.complete_text(sys_prompt, user, max_tokens=max_tokens, prefill="{")
             for candidate in (text, "{" + text):
                 try:
@@ -110,6 +117,7 @@ class LocalLLM:
                 f"{system}\n\nReturn ONLY a single valid JSON object, no prose, "
                 f"no markdown fences."
             )
+        self.stats["json_failures"] += 1
         raise LocalLLMError(f"no valid JSON after {retries + 1} attempts: {last_err}")
 
 

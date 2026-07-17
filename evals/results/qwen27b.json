@@ -1,0 +1,56 @@
+{
+  "model": "qwen/qwen3.6-27b",
+  "date": "2026-07-17",
+  "rows": [
+    {
+      "role": "deloitte",
+      "local": 100,
+      "claude": 100,
+      "errors": 0,
+      "warnings": 0,
+      "secs": 39,
+      "note": "Claude promoted the CLS/IBM cyber story hard"
+    },
+    {
+      "role": "head-biztech",
+      "local": 91,
+      "claude": 94,
+      "errors": 0,
+      "warnings": 1,
+      "secs": 41,
+      "note": "RPA is a genuine gap"
+    },
+    {
+      "role": "hsbc",
+      "local": 63,
+      "claude": 94,
+      "errors": 0,
+      "warnings": 1,
+      "secs": 40,
+      "note": "UX is a genuine gap"
+    },
+    {
+      "role": "oliver-james",
+      "local": 94,
+      "claude": 93,
+      "errors": 0,
+      "warnings": 1,
+      "secs": 38,
+      "note": "no legal-sector experience"
+    },
+    {
+      "role": "sr2",
+      "local": 77,
+      "claude": 100,
+      "errors": 0,
+      "warnings": 0,
+      "secs": 41,
+      "note": "pharma is a nice-to-have gap"
+    }
+  ],
+  "stats": {
+    "json_calls": 25,
+    "json_retries": 0,
+    "json_failures": 0
+  }
+}

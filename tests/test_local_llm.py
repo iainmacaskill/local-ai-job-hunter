@@ -37,6 +37,25 @@ def test_is_up_false_on_dead_port():
     assert LocalLLM(base_url="http://127.0.0.1:9").is_up(connect_timeout=0.3) is False
 
 
+def test_json_stats_count_calls_retries_and_failures(monkeypatch):
+    llm = LocalLLM()
+    outputs = iter(["not json at all", '{"ok": 1}'])
+    monkeypatch.setattr(llm, "complete_text", lambda *a, **k: next(outputs))
+    assert llm.complete_json("s", "u", retries=2) == {"ok": 1}
+    assert llm.stats == {"json_calls": 1, "json_retries": 1, "json_failures": 0}
+
+    monkeypatch.setattr(llm, "complete_text", lambda *a, **k: "never json")
+    with pytest.raises(local_llm.LocalLLMError):
+        llm.complete_json("s", "u", retries=1)
+    assert llm.stats == {"json_calls": 2, "json_retries": 2, "json_failures": 1}
+
+
+def test_stats_are_per_instance():
+    a, b = LocalLLM(), LocalLLM()
+    a.stats["json_calls"] = 5
+    assert b.stats["json_calls"] == 0    # no shared mutable default
+
+
 # --- live integration: skips unless a local endpoint is actually running --- #
 def test_complete_json_live_returns_payload():
     llm = LocalLLM()
