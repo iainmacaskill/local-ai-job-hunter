@@ -9,7 +9,7 @@ reliable):
      the JD's language
   4. assemble the screening payload with STRUCTURE taken   -> titles/companies/dates
      straight from profile.json                              never touched by the model
-  5. render .docx via screening_cv and a designed .pdf via interview_cv;
+  5. render .docx via cv_render and a designed .pdf via pdf_render;
      score coverage
 
 Honesty is architectural: the model only produces prose. Every employer, role
@@ -23,14 +23,12 @@ import argparse
 import sys
 from pathlib import Path
 
+import cv_render
 import honesty
+import pdf_render
 import settings
-from cv_profile import OUTPUT_DIR, PROFILE_PATH, load_profile
+from cv_profile import OUTPUT_DIR, load_profile
 from local_llm import LocalLLM
-
-settings.wire_jobtracker()
-import interview_cv  # noqa: E402  (designed PDF, reused from jobtracker until A2)
-import screening_cv  # noqa: E402  (reused from jobtracker until A2)
 
 STYLE = (
     "Write in British English. Do not use em dashes (use commas, colons or "
@@ -152,7 +150,9 @@ def build_payload(
     }
 
 
-def _render_pdf(payload: dict, role: dict, out_dir: Path) -> tuple[Path | None, str | None]:
+def _render_pdf(
+    payload: dict, role: dict, profile: dict, out_dir: Path
+) -> tuple[Path | None, str | None]:
     """Render the designed interview PDF from the same payload; never raises.
 
     The PDF is a bonus (needs headless Chrome), so a missing browser or a render
@@ -160,8 +160,8 @@ def _render_pdf(payload: dict, role: dict, out_dir: Path) -> tuple[Path | None, 
     is resolved to an absolute path because the renderer builds a file:// URI.
     """
     try:
-        pdf = interview_cv.generate_interview_cv(
-            role, screening=payload, out_dir=out_dir.resolve(), profile_path=PROFILE_PATH
+        pdf = pdf_render.generate_interview_cv(
+            role, payload, profile, out_dir=out_dir.resolve()
         )
         return pdf, None
     except Exception as exc:  # noqa: BLE001 - PDF is optional; degrade gracefully
@@ -188,12 +188,10 @@ def draft_screening_cv(
     payload = build_payload(jd_text, profile, role_title, llm, jd_keywords)
     report = honesty.verify(payload, profile)  # S3: verify before we render
     role = {"title": role_title or payload["target_title"]}
-    docx = screening_cv.generate_screening_cv(
-        role, payload, out_dir=out_dir, profile_path=PROFILE_PATH
-    )
-    pdf, pdf_error = _render_pdf(payload, role, out_dir) if render_pdf else (None, None)
-    coverage = screening_cv.keyword_coverage(
-        jd_keywords, screening_cv.cv_fulltext(payload, profile)
+    docx = cv_render.generate_screening_cv(role, payload, profile, out_dir=out_dir)
+    pdf, pdf_error = _render_pdf(payload, role, profile, out_dir) if render_pdf else (None, None)
+    coverage = cv_render.keyword_coverage(
+        jd_keywords, cv_render.cv_fulltext(payload, profile)
     )
     return {
         "docx": docx,

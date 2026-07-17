@@ -25,8 +25,8 @@ Every CV run produces both formats from one command:
 ## Setup
 
 Requires LM Studio running qwen3.6-27b with the **Local Server** started on `:1234`
-(Developer tab), and the [`jobtracker`](../jobtracker) repo checked out alongside
-this one (its engine is reused, see below).
+(Developer tab). No other repo or service is needed — the tool is fully
+self-contained.
 
 ```
 python3 -m venv .venv
@@ -73,16 +73,20 @@ It cannot judge qualitative claims semantically, so you stay the final gate. In 
 eval it caught a fabricated "over eight years" claim and produced **zero hard
 fabrications across five drafts**.
 
-## Relationship to `jobtracker`
+## Modules
 
-Deliberately **separate** from the `jobtracker` Streamlit app, but it **reuses
-jobtracker's engine by import** rather than duplicating it. Rendering
-(`screening_cv`, `interview_cv`, `cover_letter`), scoring (`keyword_coverage`) and
-your `profile.json` all stay in jobtracker as the single source of truth, so the
-honesty-critical code lives in exactly one place. `settings.py` puts the jobtracker
-checkout on the import path (override with `JOBTRACKER_PATH`; it defaults to the
-sibling `../jobtracker`) and is named `settings` (not `config`) so it never shadows
-jobtracker's own `config` module.
+Everything the tool needs lives in this repo — it stands alone:
+
+- `draft_cv.py` / `draft_cover.py` — the drafters (local-model pipeline + CLI).
+- `cv_render.py` — the ATS-safe screening `.docx`, `keyword_coverage`, `cv_fulltext`.
+- `pdf_render.py` — the designed interview `.pdf` (headless Chrome).
+- `cv_profile.py` — loads and locates `profile.json`.
+- `honesty.py` — the verification guard.
+- `local_llm.py` / `settings.py` — the local-model client and endpoint config.
+
+`cv_render` and `pdf_render` began life in a companion Streamlit tracker and were
+internalised here so the honesty-critical rendering lives in one place with no
+external checkout on the import path.
 
 ## The local-model trick (why it works)
 

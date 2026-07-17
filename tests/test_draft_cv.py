@@ -1,15 +1,8 @@
 import pytest
 
-import settings
+import draft_cv
 from cv_profile import load_profile
-
-_HAVE_JT = settings.JOBTRACKER_PATH.is_dir()
-if _HAVE_JT:
-    settings.wire_jobtracker()
-    import draft_cv  # noqa: E402
-    from local_llm import LocalLLM  # noqa: E402
-
-pytestmark = pytest.mark.skipif(not _HAVE_JT, reason="jobtracker not present (needed until A2)")
+from local_llm import LocalLLM
 
 REWRITTEN = ["Rewritten bullet mirroring AI and data delivery.", "Second rewritten bullet."]
 
