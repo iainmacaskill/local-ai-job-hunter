@@ -1,16 +1,22 @@
 """cv-drafter-local tracker (Phase B) — a local dashboard of the roles you pursue.
 
-Story B2: add roles (including the pasted job description, so B4 can draft from a
-row) and edit them inline. Starts empty; nothing leaves your machine. Run with:
+Add roles (with the pasted job description), edit them inline, watch the pipeline
+metrics, and draft the CV/cover letter for a role straight from its row using the
+local model. Starts empty; nothing leaves your machine. Run with:
   ./.venv/bin/streamlit run app.py
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
+import settings
 import tracker_db
+import tracker_draft
+from local_llm import LocalLLM
 
 st.set_page_config(page_title="CV Drafter — Tracker", page_icon="📋", layout="wide")
 
@@ -91,9 +97,87 @@ def _metrics_row(roles) -> None:
     c4.metric("Offers", m["offers"])
 
 
+def _download(col, path, label) -> None:
+    if not path:
+        return
+    p = Path(path)
+    if p.exists():
+        col.download_button(label, p.read_bytes(), file_name=p.name, key=f"dl_{p.name}")
+
+
+def _latest_draft_panel() -> None:
+    """Show the most recent draft's result and download links (survives the rerun)."""
+    d = st.session_state.get("last_draft")
+    if not d:
+        return
+    with st.container(border=True):
+        st.markdown(f"**Latest draft: {d['title']}**")
+        st.write(f"Coverage {d['coverage']}%. Honesty: {d['honesty']}.")
+        for w in d.get("warnings", []):
+            st.caption(f"review: {w}")
+        if d.get("gaps"):
+            st.caption(f"keyword gaps: {', '.join(d['gaps'])}")
+        c1, c2, c3 = st.columns(3)
+        _download(c1, d.get("cv_path"), "⬇ Screening CV (.docx)")
+        _download(c2, d.get("pdf_path"), "⬇ Interview CV (.pdf)")
+        _download(c3, d.get("cover_path"), "⬇ Cover letter (.docx)")
+
+
+def _draft_queue(conn, roles) -> None:
+    """Roles queued for drafting (status 'Draft CV' / '... & Cover Letter')."""
+    queued = [r for r in roles if (r["status"] or "") in tracker_draft.CV_QUEUE_STATUSES]
+    if not queued:
+        return
+    st.subheader(f"✍️ To draft ({len(queued)})")
+    llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
+    up = llm.is_up()
+    if not up:
+        st.warning(
+            f"Local model not reachable at {settings.LLM_BASE_URL}. "
+            "Start LM Studio's local server to draft."
+        )
+    for r in queued:
+        label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
+        with st.expander(label, expanded=True):
+            jd = st.text_area(
+                "Job description", value=r.get("jd_text") or "", height=140, key=f"jd_{r['id']}"
+            )
+            cover = r["status"] == "Draft CV & Cover Letter"
+            st.caption(
+                "Will draft: screening CV and interview PDF"
+                + (", plus a cover letter." if cover else ".")
+            )
+            if st.button("Draft now", key=f"draft_{r['id']}", disabled=not up, type="primary"):
+                if not jd.strip():
+                    st.error("Paste the job description first.")
+                    st.stop()
+                tracker_db.update_role(conn, r["id"], jd_text=jd.strip())
+                role = dict(r)
+                role["jd_text"] = jd.strip()
+                with st.spinner("Drafting locally, about a minute..."):
+                    try:
+                        out = tracker_draft.draft_for_role(conn, role, llm=llm)
+                    except Exception as exc:  # noqa: BLE001 - surface any failure to the user
+                        st.error(f"Drafting failed: {exc}")
+                        st.stop()
+                cv = out["cv"]
+                st.session_state["last_draft"] = {
+                    "title": r["title"],
+                    "coverage": cv["coverage"]["pct"],
+                    "gaps": cv["coverage"]["missing"],
+                    "honesty": cv["honesty"].summary(),
+                    "warnings": list(cv["honesty"].warnings),
+                    "cv_path": str(cv["docx"]),
+                    "pdf_path": str(cv["pdf"]) if cv.get("pdf") else None,
+                    "cover_path": str(out["cover"]["docx"]) if out.get("cover") else None,
+                }
+                st.rerun()
+
+
 conn = _conn()
 
 st.title("📋 Roles")
+_latest_draft_panel()
 _add_role_form(conn)
 
 roles = tracker_db.list_roles(conn)
@@ -134,3 +218,4 @@ else:
             "fit_notes": st.column_config.TextColumn("Fit notes", width="large"),
         },
     )
+    _draft_queue(conn, roles)

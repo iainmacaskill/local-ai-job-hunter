@@ -1,0 +1,50 @@
+"""Draft the queued document(s) for a tracked role (Phase B, story B4).
+
+This is the seam that connects the tracker to the Phase A drafting engine: it reads
+a role's saved job description, runs the drafters, records the outcome (filename,
+coverage) back onto the role and settles it to 'CV Drafted'. Kept out of the
+Streamlit layer so the integration is unit-testable with a fake model.
+"""
+
+from __future__ import annotations
+
+import draft_cover
+import draft_cv
+import tracker_db
+
+# Statuses the tracker uses as a "please draft this" trigger.
+CV_QUEUE_STATUSES = ("Draft CV", "Draft CV & Cover Letter")
+
+
+def draft_for_role(conn, role: dict, llm=None, out_dir=None, render_pdf: bool = True) -> dict:
+    """Draft the queued document(s) for ``role`` and stamp the results back.
+
+    Reads ``role['jd_text']``, drafts the screening CV (and a designed PDF), plus a
+    cover letter when the role's status is 'Draft CV & Cover Letter'. Records
+    ``cv_file`` / ``cover_file`` / ``coverage`` on the role and moves it to
+    'CV Drafted'. Returns ``{"cv": <draft_cv result>, "cover": <draft_cover result or
+    None>}``. Raises ``ValueError`` if the role has no saved job description.
+    """
+    jd = (role.get("jd_text") or "").strip()
+    if not jd:
+        raise ValueError("no job description saved for this role")
+
+    cover = role.get("status") == "Draft CV & Cover Letter"
+    title = role.get("title")
+
+    cv = draft_cv.draft_screening_cv(jd, role_title=title, llm=llm, out_dir=out_dir,
+                                     render_pdf=render_pdf)
+    fields = {
+        "cv_file": cv["docx"].name,
+        "coverage": cv["coverage"]["pct"],
+        "status": "CV Drafted",
+    }
+    cover_res = None
+    if cover:
+        cover_res = draft_cover.draft_cover_letter(
+            jd, role_title=title, company=role.get("company"), llm=llm, out_dir=out_dir
+        )
+        fields["cover_file"] = cover_res["docx"].name
+
+    tracker_db.update_role(conn, int(role["id"]), **fields)
+    return {"cv": cv, "cover": cover_res}
