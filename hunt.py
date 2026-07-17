@@ -27,16 +27,20 @@ def _needs_clearance(*texts: str) -> bool:
     return any(term in blob for term in CLEARANCE_TERMS)
 
 
-def sweep(conn, searches: list[dict], *, fetch_jd: bool = True, api_key: str | None = None) -> dict:
-    """Run each Reed search in ``searches`` and log new roles to the tracker.
+def sweep(conn, searches: list[dict], *, source=reed, fetch_jd: bool = True) -> dict:
+    """Run each search in ``searches`` against ``source`` and log new roles.
 
-    ``searches`` is a list of keyword-arg dicts for ``reed.search`` (e.g.
+    ``source`` is a job-source module (``reed`` or ``adzuna``) exposing ``search()``
+    and a ``HAS_JD_DETAIL`` flag (and ``job_description()`` when that flag is set).
+    ``searches`` is a list of keyword-arg dicts for that source's ``search`` (e.g.
     ``{"keywords": "ai delivery manager", "location": "London", "contract": True}``).
-    Returns a summary: ``{"added": [...], "skipped_seen": n, "skipped_clearance": n}``.
+    Credentials come from each source's own environment variables. Returns a summary:
+    ``{"added": [...], "skipped_seen": n, "skipped_clearance": n}``.
     """
     tracked = tracker_db.list_roles(conn)
     seen_ids = {r["source_job_id"] for r in tracked if r.get("source_job_id")}
     seen_links = {r["link"] for r in tracked if r.get("link")}
+    source_name = getattr(source, "__name__", "job").split(".")[-1].title()
 
     added: list[dict] = []
     skipped_seen = 0
@@ -44,17 +48,17 @@ def sweep(conn, searches: list[dict], *, fetch_jd: bool = True, api_key: str | N
     handled: set[str] = set()  # dedupe within this run (a role can hit several searches)
 
     for s in searches:
-        for role in reed.search(api_key=api_key, **s):
+        for role in source.search(**s):
             if role.job_id in seen_ids or role.job_id in handled or role.link in seen_links:
                 skipped_seen += 1
                 continue
             handled.add(role.job_id)
 
             jd = role.description
-            if fetch_jd:
+            if fetch_jd and getattr(source, "HAS_JD_DETAIL", False):
                 try:
-                    jd = reed.job_description(role.job_id, api_key=api_key) or role.description
-                except reed.ReedError:
+                    jd = source.job_description(role.job_id) or role.description
+                except Exception:  # noqa: BLE001 - a JD fetch failure must not sink the sweep
                     jd = role.description  # fall back to the search blurb
 
             if _needs_clearance(role.title, jd):
@@ -71,7 +75,7 @@ def sweep(conn, searches: list[dict], *, fetch_jd: bool = True, api_key: str | N
                 link=role.link or None,
                 jd_text=jd or None,
                 source_job_id=role.job_id or None,
-                fit_notes=f"Reed sweep: {s.get('keywords', '')}".strip(),
+                fit_notes=f"{source_name} sweep: {s.get('keywords', '')}".strip(),
                 status="Found",
             )
             added.append({"id": rid, "title": role.title, "company": role.company})
@@ -81,3 +85,50 @@ def sweep(conn, searches: list[dict], *, fetch_jd: bool = True, api_key: str | N
         "skipped_seen": skipped_seen,
         "skipped_clearance": skipped_clearance,
     }
+
+
+def _main(argv: list[str] | None = None) -> int:
+    import argparse
+    import importlib
+
+    import settings
+
+    settings.load_env()  # pick up REED_API_KEY / ADZUNA_APP_ID+KEY from a .env
+    ap = argparse.ArgumentParser(description="Sweep a job board into the local tracker.")
+    ap.add_argument("--source", choices=["reed", "adzuna"], default="reed")
+    ap.add_argument("--keywords", required=True, action="append",
+                    help="search term; repeat for several (e.g. --keywords a --keywords b)")
+    ap.add_argument("--location", default=None)
+    ap.add_argument("--distance", type=int, default=10, help="miles from --location")
+    ap.add_argument("--min-salary", type=int, default=None)
+    ap.add_argument("--contract", action="store_true", help="contract roles only")
+    ap.add_argument("--permanent", action="store_true", help="permanent roles only")
+    args = ap.parse_args(argv)
+
+    source = importlib.import_module(args.source)  # reed or adzuna
+    common = {
+        "location": args.location,
+        "distance": args.distance,
+        "minimum_salary": args.min_salary,
+        "contract": args.contract or None,
+        "permanent": args.permanent or None,
+    }
+    searches = [{"keywords": kw, **common} for kw in args.keywords]
+
+    conn = tracker_db.connect()
+    tracker_db.init_db(conn)
+    try:
+        summary = sweep(conn, searches, source=source)
+    except RuntimeError as exc:  # missing/rejected key, API down (ReedError/AdzunaError)
+        print(f"error: {exc}")
+        return 1
+    print(f"added:     {len(summary['added'])} new role(s)")
+    for role in summary["added"]:
+        print(f"  + {role['title']}, {role['company']}")
+    print(f"skipped:   {summary['skipped_seen']} already tracked, "
+          f"{summary['skipped_clearance']} needing clearance")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_main())

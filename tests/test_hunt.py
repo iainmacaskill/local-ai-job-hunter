@@ -1,5 +1,7 @@
 """Cover the Reed -> tracker sweep (C2): dedupe, clearance skip, insert. Offline."""
 
+import types
+
 import hunt
 import reed
 import tracker_db
@@ -27,7 +29,7 @@ def _patch_reed(monkeypatch, results, jd="Full job description."):
 def test_sweep_inserts_new_roles_as_found_with_jd(tmp_path, monkeypatch):
     conn = _db(tmp_path)
     _patch_reed(monkeypatch, [_role("111"), _role("222", title="Programme Manager")])
-    summary = hunt.sweep(conn, [{"keywords": "ai delivery manager"}], api_key="k")
+    summary = hunt.sweep(conn, [{"keywords": "ai delivery manager"}])
 
     assert len(summary["added"]) == 2 and summary["skipped_seen"] == 0
     rows = tracker_db.list_roles(conn)
@@ -43,9 +45,7 @@ def test_sweep_dedupes_against_tracked_and_within_run(tmp_path, monkeypatch):
     tracker_db.add_role(conn, title="Existing", source_job_id="111")
     # 111 already tracked; 222 appears in two searches (should insert once).
     _patch_reed(monkeypatch, [_role("111"), _role("222")])
-    summary = hunt.sweep(
-        conn, [{"keywords": "one"}, {"keywords": "two"}], api_key="k"
-    )
+    summary = hunt.sweep(conn, [{"keywords": "one"}, {"keywords": "two"}])
     assert len(summary["added"]) == 1                 # only 222, once
     assert summary["skipped_seen"] == 3               # 111 twice + 222 the second time
     assert sum(1 for r in tracker_db.list_roles(conn) if r["source_job_id"] == "222") == 1
@@ -58,7 +58,7 @@ def test_sweep_skips_clearance_roles(tmp_path, monkeypatch):
         [_role("111"), _role("222", title="Delivery Manager")],
         jd="Great role. Must hold SC clearance from day one.",
     )
-    summary = hunt.sweep(conn, [{"keywords": "delivery"}], api_key="k")
+    summary = hunt.sweep(conn, [{"keywords": "delivery"}])
     assert summary["added"] == [] and summary["skipped_clearance"] == 2
     assert tracker_db.list_roles(conn) == []
 
@@ -71,9 +71,31 @@ def test_sweep_falls_back_to_blurb_when_jd_fetch_fails(tmp_path, monkeypatch):
         raise reed.ReedError("detail endpoint down")
 
     monkeypatch.setattr(reed, "job_description", boom)
-    summary = hunt.sweep(conn, [{"keywords": "x"}], api_key="k")
+    summary = hunt.sweep(conn, [{"keywords": "x"}])
     assert len(summary["added"]) == 1
     assert tracker_db.get_role(conn, summary["added"][0]["id"])["jd_text"] == "Search blurb."
+
+
+def _snippet_source():
+    """A source without a detail endpoint (like Adzuna): only the search blurb.
+
+    A SimpleNamespace stands in for a source module, so ``__name__`` is a plain
+    attribute (a class would have its own name shadow it).
+    """
+    return types.SimpleNamespace(
+        __name__="adzuna",
+        HAS_JD_DETAIL=False,
+        search=lambda **kw: [_role("999", desc="Snippet from search only.")],
+    )
+
+
+def test_sweep_uses_snippet_when_source_has_no_detail_endpoint(tmp_path):
+    conn = _db(tmp_path)
+    summary = hunt.sweep(conn, [{"keywords": "x"}], source=_snippet_source())
+    assert len(summary["added"]) == 1
+    r = tracker_db.get_role(conn, summary["added"][0]["id"])
+    assert r["jd_text"] == "Snippet from search only."
+    assert r["fit_notes"].startswith("Adzuna sweep:")
 
 
 def test_init_db_migrates_source_job_id_onto_old_table(tmp_path):

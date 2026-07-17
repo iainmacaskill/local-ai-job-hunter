@@ -25,6 +25,9 @@ from dataclasses import dataclass
 SEARCH_URL = "https://www.reed.co.uk/api/1.0/search"
 JOB_URL = "https://www.reed.co.uk/api/1.0/jobs/{job_id}"
 
+# Reed exposes a per-job detail endpoint, so the sweep can fetch the full JD.
+HAS_JD_DETAIL = True
+
 
 class ReedError(RuntimeError):
     """Raised when the Reed API is unreachable, rejects the key, or errors."""
@@ -49,7 +52,7 @@ def _key(api_key: str | None) -> str:
     key = api_key or os.environ.get("REED_API_KEY", "")
     if not key:
         raise ReedError(
-            "no REED_API_KEY set — get a free key at https://www.reed.co.uk/developers "
+            "no REED_API_KEY set: get a free key at https://www.reed.co.uk/developers "
             "and export it (or put it in a gitignored .env)"
         )
     return key
@@ -66,7 +69,7 @@ def _get(url: str, api_key: str) -> dict:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code == 401:
-            raise ReedError("Reed API key rejected (401) — check REED_API_KEY") from exc
+            raise ReedError("Reed API key rejected (401): check REED_API_KEY") from exc
         raise ReedError(f"Reed API error {exc.code}: {exc.reason}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise ReedError(f"Reed API unreachable: {exc}") from exc
