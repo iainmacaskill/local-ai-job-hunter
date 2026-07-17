@@ -114,3 +114,21 @@ def update_role(conn: sqlite3.Connection, role_id: int, **fields) -> None:
         [*values, role_id],
     )
     conn.commit()
+
+
+def apply_editor_changes(conn: sqlite3.Connection, ordered_roles, edited_rows) -> int:
+    """Persist inline-grid edits back to the roles.
+
+    ``ordered_roles`` is the role list exactly as displayed (same order as the grid),
+    and ``edited_rows`` maps a row index to ``{column: new_value}`` (the shape
+    Streamlit's ``st.data_editor`` stores in session state). Unknown columns are
+    ignored. Returns how many roles were updated.
+    """
+    updated = 0
+    for idx, changes in (edited_rows or {}).items():
+        role = ordered_roles[int(idx)]
+        clean = {k: v for k, v in changes.items() if k in _FIELDS}
+        if clean:
+            update_role(conn, int(role["id"]), **clean)
+            updated += 1
+    return updated

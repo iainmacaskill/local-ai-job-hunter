@@ -52,3 +52,30 @@ def test_newest_first_ordering(tmp_path):
     first = tracker_db.add_role(conn, title="First")
     second = tracker_db.add_role(conn, title="Second")
     assert [r["id"] for r in tracker_db.list_roles(conn)] == [second, first]
+
+
+def test_apply_editor_changes_maps_index_to_id(tmp_path):
+    conn = _db(tmp_path)
+    first = tracker_db.add_role(conn, title="First")     # row index 1 (newest first)
+    second = tracker_db.add_role(conn, title="Second")   # row index 0
+    ordered = tracker_db.list_roles(conn)
+    # Edit row 0 (Second) -> Applied, and row 1 (First) -> a fit note.
+    edited = {
+        "0": {"status": "Applied", "date_applied": "2026-07-17"},
+        1: {"fit_notes": "strong match"},
+    }
+    n = tracker_db.apply_editor_changes(conn, ordered, edited)
+    assert n == 2
+    assert tracker_db.get_role(conn, second)["status"] == "Applied"
+    assert tracker_db.get_role(conn, second)["date_applied"] == "2026-07-17"
+    assert tracker_db.get_role(conn, first)["fit_notes"] == "strong match"
+
+
+def test_apply_editor_changes_ignores_unknown_columns_and_empty(tmp_path):
+    conn = _db(tmp_path)
+    rid = tracker_db.add_role(conn, title="Only")
+    ordered = tracker_db.list_roles(conn)
+    # A change with only an unknown column should not count as an update.
+    assert tracker_db.apply_editor_changes(conn, ordered, {"0": {"bogus": "x"}}) == 0
+    assert tracker_db.apply_editor_changes(conn, ordered, {}) == 0
+    assert tracker_db.get_role(conn, rid)["status"] == "Found"
