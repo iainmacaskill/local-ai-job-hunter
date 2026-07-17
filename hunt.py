@@ -119,6 +119,19 @@ def _title_relevant(title: str, terms) -> bool:
     return False
 
 
+def saved_to_searches(saved: dict) -> list[dict]:
+    """Turn a saved-search row into the search dicts ``sweep`` expects."""
+    keywords = [k.strip() for k in (saved.get("keywords") or "").splitlines() if k.strip()]
+    common = {
+        "location": saved.get("location") or None,
+        "distance": int(saved.get("distance") or 10),
+        "minimum_salary": int(saved.get("min_salary") or 0) or None,
+        "contract": True if saved.get("role_type") == "Contract" else None,
+        "permanent": True if saved.get("role_type") == "Permanent" else None,
+    }
+    return [{"keywords": kw, **common} for kw in keywords]
+
+
 def sweep(
     conn, searches: list[dict], *, source=reed, fetch_jd: bool = True, title_terms=None
 ) -> dict:
@@ -220,37 +233,73 @@ def _main(argv: list[str] | None = None) -> int:
     ap.add_argument("--permanent", action="store_true", help="permanent roles only")
     ap.add_argument("--all-titles", action="store_true",
                     help="keep every result (skip the title-relevance filter)")
+    ap.add_argument("--save", metavar="NAME",
+                    help="store these criteria as a named saved search, then exit")
+    ap.add_argument("--saved", metavar="NAME", help="run the named saved search")
+    ap.add_argument("--list-saved", action="store_true", help="list saved searches, then exit")
     args = ap.parse_args(argv)
 
+    conn = tracker_db.connect()
+    tracker_db.init_db(conn)
+
     if args.dedupe_board:
-        conn = tracker_db.connect()
-        tracker_db.init_db(conn)
         archived = dedupe_board(conn)
         print(f"archived:  {len(archived)} duplicate re-post(s) (restore from the Archive panel)")
         for r in archived:
             print(f"  - {r['title']}, {r['company']}")
         return 0
-    if not args.keywords:
-        ap.error("--keywords is required (unless using --dedupe-board)")
 
-    source = importlib.import_module(args.source)  # reed or adzuna
-    common = {
-        "location": args.location,
-        "distance": args.distance,
-        "minimum_salary": args.min_salary,
-        "contract": args.contract or None,
-        "permanent": args.permanent or None,
-    }
-    searches = [{"keywords": kw, **common} for kw in args.keywords]
+    if args.list_saved:
+        rows = tracker_db.list_searches(conn)
+        if not rows:
+            print("no saved searches yet (store one with --save NAME)")
+        for s in rows:
+            terms = ", ".join((s["keywords"] or "").splitlines())
+            print(f"  {s['name']}: {s['source']} | {terms} | {s['location'] or 'anywhere'}"
+                  f" | last run {s['last_run_at'] or 'never'}")
+        return 0
+
+    role_type = "Contract" if args.contract else "Permanent" if args.permanent else None
+    if args.save:
+        if not args.keywords:
+            ap.error("--save needs --keywords")
+        tracker_db.save_search(
+            conn, args.save, keywords="\n".join(args.keywords), source=args.source.title(),
+            location=args.location, distance=args.distance,
+            min_salary=args.min_salary, role_type=role_type,
+        )
+        print(f"saved search '{args.save}' (run it with --saved '{args.save}')")
+        return 0
+
+    if args.saved:
+        saved = tracker_db.get_search(conn, args.saved)
+        if not saved:
+            print(f"error: no saved search called '{args.saved}' (see --list-saved)")
+            return 1
+        source = importlib.import_module(saved["source"].lower())
+        searches = saved_to_searches(saved)
+        saved_id = saved["id"]
+    else:
+        if not args.keywords:
+            ap.error("--keywords is required (or use --saved / --list-saved / --dedupe-board)")
+        source = importlib.import_module(args.source)  # reed or adzuna
+        common = {
+            "location": args.location,
+            "distance": args.distance,
+            "minimum_salary": args.min_salary,
+            "contract": args.contract or None,
+            "permanent": args.permanent or None,
+        }
+        searches = [{"keywords": kw, **common} for kw in args.keywords]
+        saved_id = None
     title_terms = None if args.all_titles else RELEVANT_TITLE_TERMS
-
-    conn = tracker_db.connect()
-    tracker_db.init_db(conn)
     try:
         summary = sweep(conn, searches, source=source, title_terms=title_terms)
     except RuntimeError as exc:  # missing/rejected key, API down (ReedError/AdzunaError)
         print(f"error: {exc}")
         return 1
+    if saved_id:
+        tracker_db.mark_search_run(conn, saved_id)
     print(f"added:     {len(summary['added'])} new role(s)")
     for role in summary["added"]:
         print(f"  + {role['title']}, {role['company']}")

@@ -57,6 +57,20 @@ CREATE TABLE IF NOT EXISTS roles (
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_roles_status ON roles(status);
+
+-- Saved hunt criteria, so a repeat sweep is one click (Phase D).
+CREATE TABLE IF NOT EXISTS searches (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL UNIQUE,
+    source      TEXT NOT NULL DEFAULT 'Adzuna',  -- 'Adzuna' or 'Reed'
+    keywords    TEXT NOT NULL,                    -- search terms, one per line
+    location    TEXT,
+    distance    INTEGER,                          -- miles
+    min_salary  INTEGER,
+    role_type   TEXT,                             -- '', 'Contract', 'Permanent'
+    last_run_at TEXT,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
 """
 
 # Columns a caller may set/update. id and timestamps are managed here, not by callers.
@@ -233,6 +247,53 @@ def apply_editor_changes(conn: sqlite3.Connection, ordered_ids, edited_rows) -> 
             update_role(conn, int(role_id), **clean)
             updated += 1
     return updated
+
+
+def save_search(
+    conn: sqlite3.Connection, name: str, *, keywords: str, source: str = "Adzuna",
+    location: str | None = None, distance: int | None = None,
+    min_salary: int | None = None, role_type: str | None = None,
+) -> int:
+    """Create or update (by name) a saved search. Returns its id."""
+    if not (name or "").strip():
+        raise ValueError("a saved search needs a name")
+    if not (keywords or "").strip():
+        raise ValueError("a saved search needs at least one keyword")
+    conn.execute(
+        """INSERT INTO searches (name, source, keywords, location, distance,
+                                 min_salary, role_type)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(name) DO UPDATE SET
+             source = excluded.source, keywords = excluded.keywords,
+             location = excluded.location, distance = excluded.distance,
+             min_salary = excluded.min_salary, role_type = excluded.role_type""",
+        (name.strip(), source, keywords.strip(), location, distance, min_salary, role_type),
+    )
+    conn.commit()
+    row = conn.execute("SELECT id FROM searches WHERE name = ?", (name.strip(),)).fetchone()
+    return int(row[0])
+
+
+def list_searches(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("SELECT * FROM searches ORDER BY name").fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_search(conn: sqlite3.Connection, name: str) -> dict | None:
+    row = conn.execute("SELECT * FROM searches WHERE name = ?", (name.strip(),)).fetchone()
+    return dict(row) if row else None
+
+
+def delete_search(conn: sqlite3.Connection, search_id: int) -> None:
+    conn.execute("DELETE FROM searches WHERE id = ?", (int(search_id),))
+    conn.commit()
+
+
+def mark_search_run(conn: sqlite3.Connection, search_id: int) -> None:
+    conn.execute(
+        "UPDATE searches SET last_run_at = datetime('now') WHERE id = ?", (int(search_id),)
+    )
+    conn.commit()
 
 
 def archive_editor_deletions(conn: sqlite3.Connection, ordered_ids, deleted_rows) -> int:

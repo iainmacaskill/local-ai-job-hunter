@@ -52,10 +52,55 @@ def _source_ready(name: str) -> bool:
     return bool(os.environ.get("ADZUNA_APP_ID") and os.environ.get("ADZUNA_APP_KEY"))
 
 
+def _run_sweep(conn, source_name: str, searches: list[dict]) -> None:
+    """Shared sweep runner: readiness check, spinner, result message."""
+    if not _source_ready(source_name):
+        st.error(f"{source_name} keys are not set in .env yet.")
+        st.stop()
+    with st.spinner(f"Searching {source_name}..."):
+        try:
+            summary = hunt.sweep(
+                conn, searches, source=SOURCES[source_name],
+                title_terms=hunt.RELEVANT_TITLE_TERMS,
+            )
+        except RuntimeError as exc:  # missing/rejected key, API down
+            st.error(f"Search failed: {exc}")
+            st.stop()
+    st.success(
+        f"Added {len(summary['added'])} new role(s). Skipped "
+        f"{summary['skipped_seen']} already tracked, "
+        f"{summary['skipped_duplicate']} duplicate re-posts, "
+        f"{summary['skipped_irrelevant']} off-target titles, "
+        f"{summary['skipped_clearance']} needing clearance."
+    )
+
+
+def _saved_searches(conn) -> None:
+    """One-click repeat sweeps from saved criteria."""
+    saved = tracker_db.list_searches(conn)
+    if not saved:
+        return
+    st.markdown("**Saved searches**")
+    for s in saved:
+        c1, c2, c3 = st.columns([5, 1, 1])
+        terms = ", ".join((s["keywords"] or "").splitlines())
+        last = f"last run {s['last_run_at'][:10]}" if s["last_run_at"] else "never run"
+        c1.write(f"**{s['name']}**")
+        c1.caption(f"{s['source']}: {terms} | {s['location'] or 'anywhere'} | {last}")
+        if c2.button("Run", key=f"run_search_{s['id']}", type="primary"):
+            _run_sweep(conn, s["source"], hunt.saved_to_searches(s))
+            tracker_db.mark_search_run(conn, s["id"])
+        if c3.button("🗑", key=f"del_search_{s['id']}", help="Delete this saved search"):
+            tracker_db.delete_search(conn, s["id"])
+            st.rerun()
+    st.divider()
+
+
 def _find_roles(conn) -> None:
     """Search a free job board and log new roles to the tracker (C3)."""
     settings.load_env()  # pick up a .env created after the app started
-    with st.expander("🔎 Find roles (Reed / Adzuna)"):
+    with st.expander("🔎 Find roles (Adzuna / Reed)"):
+        _saved_searches(conn)
         name = st.radio("Source", list(SOURCES), horizontal=True, key="find_source")
         ready = _source_ready(name)
         if not ready:
@@ -77,8 +122,9 @@ def _find_roles(conn) -> None:
             "Type", ["Any", "Contract", "Permanent"], horizontal=True, key="find_type"
         )
 
-        if st.button("Find roles", type="primary", disabled=not ready, key="find_go"):
-            keywords = [t.strip() for t in terms.splitlines() if t.strip()]
+        keywords = [t.strip() for t in terms.splitlines() if t.strip()]
+        b1, b2, b3 = st.columns([1, 2, 1])
+        if b1.button("Find roles", type="primary", disabled=not ready, key="find_go"):
             if not keywords:
                 st.error("Add at least one search term.")
                 st.stop()
@@ -89,23 +135,26 @@ def _find_roles(conn) -> None:
                 "contract": role_type == "Contract" or None,
                 "permanent": role_type == "Permanent" or None,
             }
-            searches = [{"keywords": kw, **common} for kw in keywords]
-            with st.spinner(f"Searching {name}..."):
-                try:
-                    summary = hunt.sweep(
-                        conn, searches, source=SOURCES[name],
-                        title_terms=hunt.RELEVANT_TITLE_TERMS,
-                    )
-                except RuntimeError as exc:  # missing/rejected key, API down
-                    st.error(f"Search failed: {exc}")
-                    st.stop()
-            st.success(
-                f"Added {len(summary['added'])} new role(s). Skipped "
-                f"{summary['skipped_seen']} already tracked, "
-                f"{summary['skipped_duplicate']} duplicate re-posts, "
-                f"{summary['skipped_irrelevant']} off-target titles, "
-                f"{summary['skipped_clearance']} needing clearance."
-            )
+            _run_sweep(conn, name, [{"keywords": kw, **common} for kw in keywords])
+
+        save_name = b2.text_input(
+            "Save as", key="find_save_name", placeholder="e.g. London AI hunt",
+            label_visibility="collapsed",
+        )
+        if b3.button("Save search", key="find_save"):
+            if not save_name.strip():
+                st.error("Give the saved search a name.")
+            elif not keywords:
+                st.error("Add at least one search term.")
+            else:
+                tracker_db.save_search(
+                    conn, save_name, keywords="\n".join(keywords), source=name,
+                    location=location.strip() or None, distance=int(distance),
+                    min_salary=int(min_salary) or None,
+                    role_type=role_type if role_type != "Any" else None,
+                )
+                st.toast(f"Saved '{save_name.strip()}'")
+                st.rerun()
 
 
 def _add_role_form(conn) -> None:
