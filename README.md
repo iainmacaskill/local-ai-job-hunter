@@ -64,7 +64,7 @@ saved:    outputs/Alex Rivera - Screening - AI Delivery Manager.docx
           outputs/Alex Rivera - Interview - AI Delivery Manager.pdf
 coverage: 91%  (10/11 keywords)
 gaps:     RPA
-honesty:  review — 1 warning(s)
+honesty:  review: 1 warning(s)
   review  unverified figure '3 million' in summary
 ```
 

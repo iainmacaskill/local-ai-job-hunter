@@ -37,9 +37,9 @@ class HonestyReport:
 
     def summary(self) -> str:
         if self.errors:
-            head = f"FAIL — {len(self.errors)} error(s)"
+            head = f"FAIL: {len(self.errors)} error(s)"
         elif self.warnings:
-            head = f"review — {len(self.warnings)} warning(s)"
+            head = f"review: {len(self.warnings)} warning(s)"
         else:
             head = "clean"
         return head
