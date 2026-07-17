@@ -69,14 +69,26 @@ def _add_role_form(conn) -> None:
 
 
 def _persist_grid_edits() -> None:
-    """Callback: write the grid's inline edits back to the database."""
+    """Callback: write the grid's inline edits back to the database.
+
+    Edits are keyed to the ids of the rows *as displayed* (stored in session state
+    before the grid renders), so this stays correct even when the grid is filtered.
+    """
     state = st.session_state.get("roles_editor", {})
-    conn = _conn()
-    n = tracker_db.apply_editor_changes(
-        conn, tracker_db.list_roles(conn), state.get("edited_rows", {})
-    )
-    if n:
-        st.toast(f"Saved {n} change(s)")
+    ids = st.session_state.get("grid_ids", [])
+    if ids and state.get("edited_rows"):
+        n = tracker_db.apply_editor_changes(_conn(), ids, state["edited_rows"])
+        if n:
+            st.toast(f"Saved {n} change(s)")
+
+
+def _metrics_row(roles) -> None:
+    m = tracker_db.summarise(roles)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Active", m["active"], help="Roles not rejected or expired")
+    c2.metric("Applied", m["applied"], help="Applied, interviewing or offered")
+    c3.metric("Interviewing", m["interviewing"])
+    c4.metric("Offers", m["offers"])
 
 
 conn = _conn()
@@ -92,8 +104,18 @@ if not roles:
         "leaves your machine."
     )
 else:
-    st.caption(f"{len(roles)} role(s). Edit any cell to update; changes save automatically.")
-    df = pd.DataFrame(roles, columns=[c for c in GRID_COLUMNS])
+    _metrics_row(roles)
+    selected = st.multiselect(
+        "Filter by status", tracker_db.STATUSES, default=tracker_db.STATUSES
+    )
+    view = [r for r in roles if (r["status"] or "") in selected]
+    # Remember the displayed row ids (in order) so the edit callback maps correctly.
+    st.session_state["grid_ids"] = [r["id"] for r in view]
+
+    st.caption(
+        f"Showing {len(view)} of {len(roles)} role(s). Edit any cell; changes save automatically."
+    )
+    df = pd.DataFrame(view, columns=list(GRID_COLUMNS))
     st.data_editor(
         df,
         key="roles_editor",

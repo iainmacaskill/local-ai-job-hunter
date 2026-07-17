@@ -26,6 +26,11 @@ STATUSES = [
     "Applied", "Interview", "Offer", "Rejected", "Expired",
 ]
 
+# For the dashboard metrics: closed roles are out of play; the funnel is the set of
+# roles you have actually submitted (applied and everything downstream).
+CLOSED = {"Rejected", "Expired"}
+IN_FUNNEL = {"Applied", "Interview", "Offer"}
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS roles (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,19 +121,32 @@ def update_role(conn: sqlite3.Connection, role_id: int, **fields) -> None:
     conn.commit()
 
 
-def apply_editor_changes(conn: sqlite3.Connection, ordered_roles, edited_rows) -> int:
+def summarise(roles) -> dict:
+    """Dashboard counts for a role list: total, active, and the applied funnel."""
+    statuses = [(r.get("status") or "") for r in roles]
+    return {
+        "total": len(statuses),
+        "active": sum(s not in CLOSED for s in statuses),
+        "applied": sum(s in IN_FUNNEL for s in statuses),
+        "interviewing": sum(s == "Interview" for s in statuses),
+        "offers": sum(s == "Offer" for s in statuses),
+    }
+
+
+def apply_editor_changes(conn: sqlite3.Connection, ordered_ids, edited_rows) -> int:
     """Persist inline-grid edits back to the roles.
 
-    ``ordered_roles`` is the role list exactly as displayed (same order as the grid),
-    and ``edited_rows`` maps a row index to ``{column: new_value}`` (the shape
-    Streamlit's ``st.data_editor`` stores in session state). Unknown columns are
-    ignored. Returns how many roles were updated.
+    ``ordered_ids`` is the list of role ids exactly as displayed (same order as the
+    grid rows, so this stays correct even when the grid is filtered), and
+    ``edited_rows`` maps a row index to ``{column: new_value}`` (the shape Streamlit's
+    ``st.data_editor`` stores in session state). Unknown columns are ignored. Returns
+    how many roles were updated.
     """
     updated = 0
     for idx, changes in (edited_rows or {}).items():
-        role = ordered_roles[int(idx)]
+        role_id = ordered_ids[int(idx)]
         clean = {k: v for k, v in changes.items() if k in _FIELDS}
         if clean:
-            update_role(conn, int(role["id"]), **clean)
+            update_role(conn, int(role_id), **clean)
             updated += 1
     return updated
