@@ -98,6 +98,18 @@ def test_sweep_uses_snippet_when_source_has_no_detail_endpoint(tmp_path):
     assert r["fit_notes"].startswith("Adzuna sweep:")
 
 
+def test_sweep_filters_off_target_titles(tmp_path, monkeypatch):
+    conn = _db(tmp_path)
+    _patch_reed(monkeypatch, [
+        _role("111", title="AI Delivery Manager"),   # relevant (ai + delivery)
+        _role("222", title="HGV Repair Engineer"),   # off-target ('ai' only inside 'repair')
+        _role("333", title="Supply Chain Manager"),  # off-target (manager, no domain term)
+    ])
+    summary = hunt.sweep(conn, [{"keywords": "x"}], title_terms=hunt.RELEVANT_TITLE_TERMS)
+    assert [a["title"] for a in summary["added"]] == ["AI Delivery Manager"]
+    assert summary["skipped_irrelevant"] == 2
+
+
 def test_init_db_migrates_source_job_id_onto_old_table(tmp_path):
     # An older tracker.db created before source_job_id existed.
     conn = tracker_db.connect(tmp_path / "old.db")

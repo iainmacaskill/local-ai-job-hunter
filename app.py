@@ -89,13 +89,17 @@ def _find_roles(conn) -> None:
             searches = [{"keywords": kw, **common} for kw in keywords]
             with st.spinner(f"Searching {name}..."):
                 try:
-                    summary = hunt.sweep(conn, searches, source=SOURCES[name])
+                    summary = hunt.sweep(
+                        conn, searches, source=SOURCES[name],
+                        title_terms=hunt.RELEVANT_TITLE_TERMS,
+                    )
                 except RuntimeError as exc:  # missing/rejected key, API down
                     st.error(f"Search failed: {exc}")
                     st.stop()
             st.success(
                 f"Added {len(summary['added'])} new role(s). Skipped "
                 f"{summary['skipped_seen']} already tracked, "
+                f"{summary['skipped_irrelevant']} off-target titles, "
                 f"{summary['skipped_clearance']} needing clearance."
             )
 
