@@ -112,3 +112,9 @@ prose.
 Phase 1 (this repo): **drafting**, complete. Later phases, in priority order:
 **tracking**, then **board scraping** (which also unlocks fetching a JD straight
 from a link).
+
+## License
+
+[MIT](LICENSE). Your own CV data lives in `profile.json`, which is gitignored and
+never leaves your machine; copy `profile.example.json` to `profile.json` and fill
+in your details to get started.
