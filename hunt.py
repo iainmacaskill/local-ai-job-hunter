@@ -65,7 +65,9 @@ def sweep(
     all. Credentials come from each source's own environment variables. Returns a
     summary: ``{"added", "skipped_seen", "skipped_clearance", "skipped_irrelevant"}``.
     """
-    tracked = tracker_db.list_roles(conn)
+    # Include archived roles: pruning a role from the board must not let the next
+    # sweep re-add it.
+    tracked = tracker_db.list_roles(conn, include_archived=True)
     seen_ids = {r["source_job_id"] for r in tracked if r.get("source_job_id")}
     seen_links = {r["link"] for r in tracked if r.get("link")}
     source_name = getattr(source, "__name__", "job").split(".")[-1].title()

@@ -98,6 +98,16 @@ def test_sweep_uses_snippet_when_source_has_no_detail_endpoint(tmp_path):
     assert r["fit_notes"].startswith("Adzuna sweep:")
 
 
+def test_sweep_never_readds_an_archived_role(tmp_path, monkeypatch):
+    conn = _db(tmp_path)
+    rid = tracker_db.add_role(conn, title="Pruned", source_job_id="111")
+    tracker_db.archive_roles(conn, [rid])
+    _patch_reed(monkeypatch, [_role("111")])
+    summary = hunt.sweep(conn, [{"keywords": "x"}])
+    assert summary["added"] == [] and summary["skipped_seen"] == 1
+    assert len(tracker_db.list_roles(conn, include_archived=True)) == 1   # still just one
+
+
 def test_sweep_filters_off_target_titles(tmp_path, monkeypatch):
     conn = _db(tmp_path)
     _patch_reed(monkeypatch, [

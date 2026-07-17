@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS roles (
     contact_email TEXT,                        -- recruiter contact for the follow-up
     contact_source TEXT,                       -- provenance: 'advert' (parsed) or 'manual'
     followed_up_at TEXT,                       -- date the user sent their follow-up
+    archived     INTEGER NOT NULL DEFAULT 0,   -- 1 = hidden from the board (reversible)
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -87,6 +88,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     new_columns = [
         ("source_job_id", "TEXT"),
         ("contact_email", "TEXT"), ("contact_source", "TEXT"), ("followed_up_at", "TEXT"),
+        ("archived", "INTEGER NOT NULL DEFAULT 0"),
     ]
     for col, ddl in new_columns:
         if col not in have:
@@ -131,10 +133,50 @@ def add_role(conn: sqlite3.Connection, **fields) -> int:
     return int(cur.lastrowid)
 
 
-def list_roles(conn: sqlite3.Connection) -> list[dict]:
-    """All roles, newest first."""
-    rows = conn.execute("SELECT * FROM roles ORDER BY id DESC").fetchall()
+def list_roles(conn: sqlite3.Connection, include_archived: bool = False) -> list[dict]:
+    """Roles newest first; archived ones are hidden unless asked for."""
+    where = "" if include_archived else "WHERE archived = 0"
+    rows = conn.execute(f"SELECT * FROM roles {where} ORDER BY id DESC").fetchall()
     return [dict(r) for r in rows]
+
+
+def list_archived(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("SELECT * FROM roles WHERE archived = 1 ORDER BY id DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+def _set_archived(conn: sqlite3.Connection, role_ids, value: int) -> int:
+    ids = [int(i) for i in role_ids]
+    if not ids:
+        return 0
+    marks = ", ".join("?" for _ in ids)
+    cur = conn.execute(
+        f"UPDATE roles SET archived = ?, updated_at = datetime('now') WHERE id IN ({marks})",
+        [value, *ids],
+    )
+    conn.commit()
+    return cur.rowcount
+
+
+def archive_roles(conn: sqlite3.Connection, role_ids) -> int:
+    """Hide roles from the board (reversible). Returns how many were archived."""
+    return _set_archived(conn, role_ids, 1)
+
+
+def restore_roles(conn: sqlite3.Connection, role_ids) -> int:
+    """Bring archived roles back onto the board."""
+    return _set_archived(conn, role_ids, 0)
+
+
+def delete_roles(conn: sqlite3.Connection, role_ids) -> int:
+    """Permanently remove roles. Only the Archive panel calls this, after archiving."""
+    ids = [int(i) for i in role_ids]
+    if not ids:
+        return 0
+    marks = ", ".join("?" for _ in ids)
+    cur = conn.execute(f"DELETE FROM roles WHERE id IN ({marks})", ids)
+    conn.commit()
+    return cur.rowcount
 
 
 def get_role(conn: sqlite3.Connection, role_id: int) -> dict | None:
@@ -191,3 +233,14 @@ def apply_editor_changes(conn: sqlite3.Connection, ordered_ids, edited_rows) -> 
             update_role(conn, int(role_id), **clean)
             updated += 1
     return updated
+
+
+def archive_editor_deletions(conn: sqlite3.Connection, ordered_ids, deleted_rows) -> int:
+    """Archive the rows the user removed from the grid (never a hard delete).
+
+    ``deleted_rows`` is the list of row indices Streamlit's ``st.data_editor``
+    reports (in the displayed order that ``ordered_ids`` mirrors). Returns how
+    many roles were archived.
+    """
+    ids = [ordered_ids[int(i)] for i in (deleted_rows or []) if int(i) < len(ordered_ids)]
+    return archive_roles(conn, ids)

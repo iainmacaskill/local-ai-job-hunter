@@ -17,7 +17,8 @@ different path:
    interfaces, no scraping) and files new, relevant roles on a simple board. Roles
    you have already seen, and roles needing security clearance, are skipped.
 2. **You decide.** Each role arrives as *Found*. Read the advert and either *Pass*
-   or set it to *Draft CV*.
+   or set it to *Draft CV*. Tidying is bulk-friendly: tick rows and press delete to
+   archive them (reversible, and a search never re-adds an archived role).
 3. **It drafts.** The AI on your own laptop rewrites your real experience to mirror
    the advert: a plain CV for the automated screening systems, a designed PDF for
    human readers, and a cover letter if you want one. About 50 seconds, about £0.

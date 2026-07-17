@@ -144,17 +144,27 @@ def _add_role_form(conn) -> None:
 
 
 def _persist_grid_edits() -> None:
-    """Callback: write the grid's inline edits back to the database.
+    """Callback: persist inline edits, and archive rows removed from the grid.
 
-    Edits are keyed to the ids of the rows *as displayed* (stored in session state
-    before the grid renders), so this stays correct even when the grid is filtered.
+    Everything is keyed to the ids of the rows *as displayed* (stored in session
+    state before the grid renders), so it stays correct even when filtered.
+    Removing a row archives it (reversible from the Archive panel), never deletes.
     """
     state = st.session_state.get("roles_editor", {})
     ids = st.session_state.get("grid_ids", [])
-    if ids and state.get("edited_rows"):
-        n = tracker_db.apply_editor_changes(_conn(), ids, state["edited_rows"])
+    if not ids:
+        return
+    conn = _conn()
+    if state.get("edited_rows"):
+        n = tracker_db.apply_editor_changes(conn, ids, state["edited_rows"])
         if n:
             st.toast(f"Saved {n} change(s)")
+    if state.get("deleted_rows"):
+        n = tracker_db.archive_editor_deletions(conn, ids, state["deleted_rows"])
+        if n:
+            st.toast(f"Archived {n} role(s). Restore from the Archive panel below.")
+    if state.get("added_rows"):
+        st.toast("Use the Add a role form above to add roles.")
 
 
 def _metrics_row(roles, due_count: int) -> None:
@@ -309,6 +319,34 @@ def _draft_queue(conn, roles) -> None:
                 st.rerun()
 
 
+def _archive_panel(conn) -> None:
+    """Archived roles: restore them, or permanently delete after a confirm tick."""
+    archived = tracker_db.list_archived(conn)
+    if not archived:
+        return
+    with st.expander(f"🗂 Archive ({len(archived)})"):
+        st.caption(
+            "Archived roles are off the board but still known to the sweep, so they "
+            "will not be re-added by a search. Restore any, or delete them for good."
+        )
+        for r in archived:
+            c1, c2 = st.columns([5, 1])
+            label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
+            c1.write(f"{label} ({r.get('status')})")
+            if c2.button("Restore", key=f"restore_{r['id']}"):
+                tracker_db.restore_roles(conn, [r["id"]])
+                st.rerun()
+        st.divider()
+        sure = st.checkbox(
+            f"Yes, permanently delete all {len(archived)} archived role(s)",
+            key="purge_confirm",
+        )
+        if st.button("Delete permanently", disabled=not sure, key="purge_go"):
+            n = tracker_db.delete_roles(conn, [r["id"] for r in archived])
+            st.toast(f"Deleted {n} role(s) permanently")
+            st.rerun()
+
+
 conn = _conn()
 
 st.title("📋 Roles")
@@ -335,7 +373,8 @@ else:
     st.session_state["grid_ids"] = [r["id"] for r in view]
 
     st.caption(
-        f"Showing {len(view)} of {len(roles)} role(s). Edit any cell; changes save automatically."
+        f"Showing {len(view)} of {len(roles)} role(s). Edit any cell; changes save "
+        f"automatically. Tick rows and press Delete to archive them (reversible below)."
     )
     df = pd.DataFrame(view, columns=list(GRID_COLUMNS))
     st.data_editor(
@@ -344,7 +383,7 @@ else:
         on_change=_persist_grid_edits,
         width="stretch",
         hide_index=True,
-        num_rows="fixed",
+        num_rows="dynamic",
         disabled=READONLY_COLUMNS,
         column_config={
             "id": st.column_config.NumberColumn("ID", width="small"),
@@ -358,3 +397,5 @@ else:
     )
     _draft_queue(conn, roles)
     _followups_due(conn, due)
+
+_archive_panel(conn)

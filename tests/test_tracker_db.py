@@ -107,6 +107,37 @@ def test_summarise_counts_the_search_funnel(tmp_path):
     assert m["passed"] == 1          # Pass
 
 
+def test_archive_hides_restore_returns_delete_removes(tmp_path):
+    conn = _db(tmp_path)
+    keep = tracker_db.add_role(conn, title="Keep")
+    gone = tracker_db.add_role(conn, title="Archive me")
+
+    assert tracker_db.archive_roles(conn, [gone]) == 1
+    assert [r["id"] for r in tracker_db.list_roles(conn)] == [keep]          # hidden
+    assert [r["id"] for r in tracker_db.list_roles(conn, include_archived=True)] == [gone, keep]
+    assert [r["id"] for r in tracker_db.list_archived(conn)] == [gone]
+
+    assert tracker_db.restore_roles(conn, [gone]) == 1                        # back
+    assert [r["id"] for r in tracker_db.list_roles(conn)] == [gone, keep]
+
+    tracker_db.archive_roles(conn, [gone])
+    assert tracker_db.delete_roles(conn, [gone]) == 1                         # gone for good
+    assert tracker_db.get_role(conn, gone) is None
+    assert tracker_db.archive_roles(conn, []) == 0                            # no-ops safe
+    assert tracker_db.delete_roles(conn, []) == 0
+
+
+def test_archive_editor_deletions_maps_displayed_rows(tmp_path):
+    conn = _db(tmp_path)
+    first = tracker_db.add_role(conn, title="First")     # displayed index 1
+    second = tracker_db.add_role(conn, title="Second")   # displayed index 0
+    ids = [r["id"] for r in tracker_db.list_roles(conn)]
+    n = tracker_db.archive_editor_deletions(conn, ids, [1, 99])   # 99 out of range: ignored
+    assert n == 1
+    assert [r["id"] for r in tracker_db.list_roles(conn)] == [second]
+    assert tracker_db.get_role(conn, first)["archived"] == 1
+
+
 def test_init_db_migrates_retired_statuses(tmp_path):
     conn = _db(tmp_path)
     # Rows left on old (pre-slim) statuses, then re-init to migrate them.
