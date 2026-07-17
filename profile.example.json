@@ -1,0 +1,49 @@
+{
+  "name": "Alex Rivera",
+  "contact": "London  |  linkedin.com/in/alexrivera",
+  "competencies": [
+    "Programme Delivery",
+    "Agile and Scrum",
+    "Stakeholder Management",
+    "Risk and Governance",
+    "Budget Management",
+    "Change Management",
+    "Vendor Management",
+    "Data and Analytics"
+  ],
+  "achievements": [
+    "Delivered a customer platform migration of 2 million records with zero downtime.",
+    "Reduced delivery defects by 25 percent through stronger governance and QA.",
+    "Led a cross-functional team of 20 to deliver a regulated change programme on time."
+  ],
+  "certifications": "Certified ScrumMaster (CSM)  |  PRINCE2 Practitioner  |  PMP",
+  "education": "BSc Computer Science, Example University",
+  "jobs": [
+    {
+      "title": "Programme Manager",
+      "company": "Example Corp",
+      "dates": "2022 - Present",
+      "bullets": [
+        "Led end-to-end delivery of a multi-workstream technology programme.",
+        "Managed budgets, risks and dependencies across cross-functional teams."
+      ]
+    },
+    {
+      "title": "Senior Project Manager",
+      "company": "Sample Ltd",
+      "dates": "2019 - 2022",
+      "bullets": [
+        "Delivered a CRM migration of 2 million records with zero downtime.",
+        "Embedded new Agile ways of working across three delivery teams."
+      ]
+    },
+    {
+      "title": "Project Manager",
+      "company": "Demo Group",
+      "dates": "2016 - 2019",
+      "bullets": [
+        "Delivered a regulated payments platform in a controlled environment."
+      ]
+    }
+  ]
+}

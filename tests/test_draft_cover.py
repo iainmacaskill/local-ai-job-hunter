@@ -1,16 +1,8 @@
 import pytest
 
-import settings
-
-_HAVE_JT = settings.JOBTRACKER_PATH.is_dir()
-if _HAVE_JT:
-    settings.wire_jobtracker()
-    import screening_cv  # noqa: E402
-
-    import draft_cover  # noqa: E402
-    from local_llm import LocalLLM  # noqa: E402
-
-pytestmark = pytest.mark.skipif(not _HAVE_JT, reason="jobtracker checkout not present")
+import draft_cover
+from cv_profile import load_profile
+from local_llm import LocalLLM
 
 CLEAN = [
     "I am writing to apply for the role, drawing on my background in AI programme delivery.",
@@ -30,7 +22,7 @@ class FakeLLM:
 
 
 def test_renders_docx_and_txt_and_verifies_clean(tmp_path):
-    prof = screening_cv.load_profile()
+    prof = load_profile()
     res = draft_cover.draft_cover_letter(
         "JD: AI delivery role in financial services.",
         role_title="AI Delivery Manager", company="Acme",
@@ -43,7 +35,7 @@ def test_renders_docx_and_txt_and_verifies_clean(tmp_path):
 
 
 def test_guard_flags_fake_figure_and_em_dash(tmp_path):
-    prof = screening_cv.load_profile()
+    prof = load_profile()
     bad = ["I cut costs by 47% and, importantly — delivered early.", CLEAN[1], CLEAN[2]]
     res = draft_cover.draft_cover_letter(
         "JD", role_title="X", company="Y",

@@ -1,16 +1,15 @@
 import pytest
 
 import settings
+from cv_profile import load_profile
 
 _HAVE_JT = settings.JOBTRACKER_PATH.is_dir()
 if _HAVE_JT:
     settings.wire_jobtracker()
-    import screening_cv  # noqa: E402
-
     import draft_cv  # noqa: E402
     from local_llm import LocalLLM  # noqa: E402
 
-pytestmark = pytest.mark.skipif(not _HAVE_JT, reason="jobtracker checkout not present")
+pytestmark = pytest.mark.skipif(not _HAVE_JT, reason="jobtracker not present (needed until A2)")
 
 REWRITTEN = ["Rewritten bullet mirroring AI and data delivery.", "Second rewritten bullet."]
 
@@ -33,7 +32,7 @@ class FakeLLM:
 
 
 def _draft():
-    prof = screening_cv.load_profile()
+    prof = load_profile()
     import tempfile
 
     out = tempfile.mkdtemp()

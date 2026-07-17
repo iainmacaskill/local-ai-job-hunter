@@ -16,15 +16,12 @@ import sys
 from datetime import timezone
 from pathlib import Path
 
+from docx import Document
+
 import honesty
 import settings
+from cv_profile import OUTPUT_DIR, load_profile
 from local_llm import LocalLLM
-
-settings.wire_jobtracker()
-import screening_cv  # noqa: E402  (reused for load_profile)
-from docx import Document  # noqa: E402
-
-OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
 
 STYLE = (
     "Write in British English. Do not use em dashes (use commas, colons or "
@@ -139,7 +136,7 @@ def draft_cover_letter(
     llm=None,
     out_dir: Path | None = None,
 ) -> dict:
-    profile = profile or screening_cv.load_profile()
+    profile = profile or load_profile()
     llm = llm or LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
     out_dir = Path(out_dir) if out_dir else OUTPUT_DIR
 

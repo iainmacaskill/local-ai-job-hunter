@@ -25,13 +25,12 @@ from pathlib import Path
 
 import honesty
 import settings
+from cv_profile import OUTPUT_DIR, PROFILE_PATH, load_profile
 from local_llm import LocalLLM
 
 settings.wire_jobtracker()
-import interview_cv  # noqa: E402  (designed PDF, reused from jobtracker)
-import screening_cv  # noqa: E402  (import after the jobtracker path is wired)
-
-OUTPUT_DIR = Path(__file__).resolve().parent / "outputs"
+import interview_cv  # noqa: E402  (designed PDF, reused from jobtracker until A2)
+import screening_cv  # noqa: E402  (reused from jobtracker until A2)
 
 STYLE = (
     "Write in British English. Do not use em dashes (use commas, colons or "
@@ -161,7 +160,9 @@ def _render_pdf(payload: dict, role: dict, out_dir: Path) -> tuple[Path | None, 
     is resolved to an absolute path because the renderer builds a file:// URI.
     """
     try:
-        pdf = interview_cv.generate_interview_cv(role, screening=payload, out_dir=out_dir.resolve())
+        pdf = interview_cv.generate_interview_cv(
+            role, screening=payload, out_dir=out_dir.resolve(), profile_path=PROFILE_PATH
+        )
         return pdf, None
     except Exception as exc:  # noqa: BLE001 - PDF is optional; degrade gracefully
         return None, str(exc)
@@ -179,7 +180,7 @@ def draft_screening_cv(
 
     Returns paths, payload, coverage, keywords and the honesty report.
     """
-    profile = profile or screening_cv.load_profile()
+    profile = profile or load_profile()
     llm = llm or LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
     out_dir = Path(out_dir) if out_dir else OUTPUT_DIR
 
@@ -187,7 +188,9 @@ def draft_screening_cv(
     payload = build_payload(jd_text, profile, role_title, llm, jd_keywords)
     report = honesty.verify(payload, profile)  # S3: verify before we render
     role = {"title": role_title or payload["target_title"]}
-    docx = screening_cv.generate_screening_cv(role, payload, out_dir=out_dir)
+    docx = screening_cv.generate_screening_cv(
+        role, payload, out_dir=out_dir, profile_path=PROFILE_PATH
+    )
     pdf, pdf_error = _render_pdf(payload, role, out_dir) if render_pdf else (None, None)
     coverage = screening_cv.keyword_coverage(
         jd_keywords, screening_cv.cv_fulltext(payload, profile)
