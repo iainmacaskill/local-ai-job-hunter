@@ -15,6 +15,16 @@ import tracker_db
 # Statuses the tracker uses as a "please draft this" trigger.
 CV_QUEUE_STATUSES = tracker_db.DRAFT_STATUSES
 
+# Below this length a stored job description is almost certainly a search-result
+# snippet (Adzuna returns ~300 characters), not the full advert. Drafting against
+# a snippet produces a thin CV and a misleadingly rosy coverage score.
+SNIPPET_MIN_CHARS = 600
+
+
+def looks_like_snippet(jd_text: str | None) -> bool:
+    """True when the stored JD is too short to be a full advert."""
+    return 0 < len((jd_text or "").strip()) < SNIPPET_MIN_CHARS
+
 
 def draft_for_role(conn, role: dict, llm=None, out_dir=None, render_pdf: bool = True) -> dict:
     """Draft the queued document(s) for ``role`` and stamp the results back.

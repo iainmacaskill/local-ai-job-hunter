@@ -21,6 +21,7 @@ import reed
 import settings
 import tracker_db
 import tracker_draft
+import triage
 from cv_profile import load_profile
 from local_llm import LocalLLM
 
@@ -33,9 +34,10 @@ st.set_page_config(page_title="CV Drafter — Tracker", page_icon="📋", layout
 # kept but not shown here. `date_found` and `coverage` are read-only (managed).
 GRID_COLUMNS = [
     "id", "date_found", "title", "company", "type", "rate", "location",
-    "status", "coverage", "date_applied", "contact_email", "outcome", "link", "fit_notes",
+    "status", "fit_score", "fit_reason", "coverage", "date_applied",
+    "contact_email", "outcome", "link", "fit_notes",
 ]
-READONLY_COLUMNS = ["id", "date_found", "coverage"]
+READONLY_COLUMNS = ["id", "date_found", "coverage", "fit_score", "fit_reason"]
 TYPE_OPTIONS = ["", "Contract", "Permanent"]
 
 
@@ -338,6 +340,12 @@ def _draft_queue(conn, roles) -> None:
             jd = st.text_area(
                 "Job description", value=r.get("jd_text") or "", height=140, key=f"jd_{r['id']}"
             )
+            if tracker_draft.looks_like_snippet(jd):
+                st.warning(
+                    "This looks like a search-result snippet, not the full advert. "
+                    "Paste the full advert above for a proper draft and an honest "
+                    "coverage score."
+                )
             cover = r["status"] == "Draft CV & Cover Letter"
             st.caption(
                 "Will draft: screening CV and interview PDF"
@@ -416,16 +424,43 @@ if not roles:
     )
 else:
     _metrics_row(roles, len(due))
+
+    unscored = [r for r in roles if r["status"] == "Found" and r.get("fit_score") is None]
+    if unscored:
+        if st.button(f"🎯 Score my fit for {len(unscored)} new role(s)", type="primary"):
+            try:
+                profile = load_profile()
+            except FileNotFoundError:
+                st.error("profile.json is needed to score fit (copy profile.example.json).")
+                st.stop()
+            llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
+            scorer = llm if llm.is_up() else None
+            if scorer is None:
+                st.caption("Local model offline: scoring by keyword overlap only.")
+            bar = st.progress(0.0, text="Scoring...")
+            triage.score_found(
+                conn, profile, scorer,
+                progress=lambda i, n: bar.progress(i / n, text=f"Scoring {i} of {n}..."),
+            )
+            st.rerun()
+
     selected = st.multiselect(
         "Filter by status", tracker_db.STATUSES, default=tracker_db.STATUSES
     )
     view = [r for r in roles if (r["status"] or "") in selected]
+    # Ranked triage: scored roles first, best fit at the top; unscored keep
+    # their newest-first order below (the sort is stable).
+    view.sort(
+        key=lambda r: (r.get("fit_score") is not None, r.get("fit_score") or 0),
+        reverse=True,
+    )
     # Remember the displayed row ids (in order) so the edit callback maps correctly.
     st.session_state["grid_ids"] = [r["id"] for r in view]
 
     st.caption(
-        f"Showing {len(view)} of {len(roles)} role(s). Edit any cell; changes save "
-        f"automatically. Tick rows and press Delete to archive them (reversible below)."
+        f"Showing {len(view)} of {len(roles)} role(s), best fit first once scored. "
+        f"Edit any cell; changes save automatically. Tick rows and press Delete to "
+        f"archive them (reversible below)."
     )
     df = pd.DataFrame(view, columns=list(GRID_COLUMNS))
     st.data_editor(
@@ -441,6 +476,8 @@ else:
             "date_found": st.column_config.TextColumn("Found", width="small"),
             "status": st.column_config.SelectboxColumn("Status", options=tracker_db.STATUSES),
             "type": st.column_config.SelectboxColumn("Type", options=TYPE_OPTIONS),
+            "fit_score": st.column_config.NumberColumn("Fit %", width="small"),
+            "fit_reason": st.column_config.TextColumn("Why / why not", width="large"),
             "coverage": st.column_config.NumberColumn("Cov %", width="small"),
             "link": st.column_config.LinkColumn("Link"),
             "fit_notes": st.column_config.TextColumn("Fit notes", width="large"),

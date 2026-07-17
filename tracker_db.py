@@ -52,6 +52,8 @@ CREATE TABLE IF NOT EXISTS roles (
     contact_email TEXT,                        -- recruiter contact for the follow-up
     contact_source TEXT,                       -- provenance: 'advert' (parsed) or 'manual'
     followed_up_at TEXT,                       -- date the user sent their follow-up
+    fit_score    INTEGER,                      -- triage: 0-100 fit vs the profile
+    fit_reason   TEXT,                         -- triage: one-line why / why not
     archived     INTEGER NOT NULL DEFAULT 0,   -- 1 = hidden from the board (reversible)
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
@@ -78,7 +80,7 @@ _FIELDS = (
     "date_found", "title", "company", "type", "rate", "location", "link",
     "jd_text", "fit_notes", "status", "cv_file", "cover_file", "coverage",
     "date_applied", "outcome", "source_job_id",
-    "contact_email", "contact_source", "followed_up_at",
+    "contact_email", "contact_source", "followed_up_at", "fit_score", "fit_reason",
 )
 
 
@@ -103,6 +105,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
         ("source_job_id", "TEXT"),
         ("contact_email", "TEXT"), ("contact_source", "TEXT"), ("followed_up_at", "TEXT"),
         ("archived", "INTEGER NOT NULL DEFAULT 0"),
+        ("fit_score", "INTEGER"), ("fit_reason", "TEXT"),
     ]
     for col, ddl in new_columns:
         if col not in have:
