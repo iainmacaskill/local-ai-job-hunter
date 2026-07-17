@@ -27,6 +27,11 @@ different path:
 5. **You apply.** Mark the role *Applied*. From there the conversation with the
    recruiter is yours; the tool tracks the search, not the relationship.
 
+![The tracker board: search and add panels at the top, the funnel metrics, and the roles the tool found, each with a status to triage](docs/tracker.png)
+
+*The board after one real sweep: 96 roles found from a free job-board search,
+waiting to be triaged. Everything shown is running locally.*
+
 ## The AI runs on your computer, not in the cloud
 
 This is the part that surprises people: there is no ChatGPT subscription, no API
