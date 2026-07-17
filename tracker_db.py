@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS roles (
     coverage     INTEGER,                     -- last draft's keyword coverage %
     date_applied TEXT,
     outcome      TEXT,
+    source_job_id TEXT,                        -- Reed job id, for sweep dedupe (C2)
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -59,7 +60,7 @@ CREATE INDEX IF NOT EXISTS idx_roles_status ON roles(status);
 _FIELDS = (
     "date_found", "title", "company", "type", "rate", "location", "link",
     "jd_text", "fit_notes", "status", "cv_file", "cover_file", "coverage",
-    "date_applied", "outcome",
+    "date_applied", "outcome", "source_job_id",
 )
 
 
@@ -77,8 +78,18 @@ def connect(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
     return conn
 
 
+def _ensure_columns(conn: sqlite3.Connection) -> None:
+    """Add any columns a newer version introduced to an already-existing table."""
+    have = {row[1] for row in conn.execute("PRAGMA table_info(roles)")}
+    for col, ddl in [("source_job_id", "TEXT")]:
+        if col not in have:
+            conn.execute(f"ALTER TABLE roles ADD COLUMN {col} {ddl}")
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
+    _ensure_columns(conn)  # migrate DBs created before a column was added
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_roles_source_job_id ON roles(source_job_id)")
     conn.commit()
 
 
