@@ -8,15 +8,21 @@ local model. Starts empty; nothing leaves your machine. Run with:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
+import adzuna
+import hunt
+import reed
 import settings
 import tracker_db
 import tracker_draft
 from local_llm import LocalLLM
+
+SOURCES = {"Reed": reed, "Adzuna": adzuna}
 
 st.set_page_config(page_title="CV Drafter — Tracker", page_icon="📋", layout="wide")
 
@@ -35,6 +41,63 @@ def _conn():
     conn = tracker_db.connect()
     tracker_db.init_db(conn)
     return conn
+
+
+def _source_ready(name: str) -> bool:
+    if name == "Reed":
+        return bool(os.environ.get("REED_API_KEY"))
+    return bool(os.environ.get("ADZUNA_APP_ID") and os.environ.get("ADZUNA_APP_KEY"))
+
+
+def _find_roles(conn) -> None:
+    """Search a free job board and log new roles to the tracker (C3)."""
+    settings.load_env()  # pick up a .env created after the app started
+    with st.expander("🔎 Find roles (Reed / Adzuna)"):
+        name = st.radio("Source", list(SOURCES), horizontal=True, key="find_source")
+        ready = _source_ready(name)
+        if not ready:
+            need = "REED_API_KEY" if name == "Reed" else "ADZUNA_APP_ID and ADZUNA_APP_KEY"
+            where = "reed.co.uk/developers" if name == "Reed" else "developer.adzuna.com"
+            st.info(f"Add {need} to a .env file to search {name} (free key at {where}).")
+
+        terms = st.text_area(
+            "Search terms (one per line)", value="ai delivery manager\nprogramme manager",
+            height=90, key="find_terms",
+        )
+        c1, c2, c3 = st.columns(3)
+        location = c1.text_input("Location", value="London", key="find_location")
+        distance = c2.number_input("Distance (miles)", min_value=0, value=20, key="find_distance")
+        min_salary = c3.number_input(
+            "Min salary", min_value=0, value=0, step=1000, key="find_salary"
+        )
+        role_type = st.radio(
+            "Type", ["Any", "Contract", "Permanent"], horizontal=True, key="find_type"
+        )
+
+        if st.button("Find roles", type="primary", disabled=not ready, key="find_go"):
+            keywords = [t.strip() for t in terms.splitlines() if t.strip()]
+            if not keywords:
+                st.error("Add at least one search term.")
+                st.stop()
+            common = {
+                "location": location.strip() or None,
+                "distance": int(distance),
+                "minimum_salary": int(min_salary) or None,
+                "contract": role_type == "Contract" or None,
+                "permanent": role_type == "Permanent" or None,
+            }
+            searches = [{"keywords": kw, **common} for kw in keywords]
+            with st.spinner(f"Searching {name}..."):
+                try:
+                    summary = hunt.sweep(conn, searches, source=SOURCES[name])
+                except RuntimeError as exc:  # missing/rejected key, API down
+                    st.error(f"Search failed: {exc}")
+                    st.stop()
+            st.success(
+                f"Added {len(summary['added'])} new role(s). Skipped "
+                f"{summary['skipped_seen']} already tracked, "
+                f"{summary['skipped_clearance']} needing clearance."
+            )
 
 
 def _add_role_form(conn) -> None:
@@ -178,6 +241,7 @@ conn = _conn()
 
 st.title("📋 Roles")
 _latest_draft_panel()
+_find_roles(conn)
 _add_role_form(conn)
 
 roles = tracker_db.list_roles(conn)
