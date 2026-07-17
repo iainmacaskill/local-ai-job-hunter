@@ -11,6 +11,7 @@ The database lives beside this file as ``tracker.db`` (gitignored) unless
 
 from __future__ import annotations
 
+import datetime
 import os
 import sqlite3
 from pathlib import Path
@@ -48,6 +49,9 @@ CREATE TABLE IF NOT EXISTS roles (
     date_applied TEXT,
     outcome      TEXT,
     source_job_id TEXT,                        -- Reed job id, for sweep dedupe (C2)
+    contact_email TEXT,                        -- recruiter contact for the follow-up
+    contact_source TEXT,                       -- provenance: 'advert' (parsed) or 'manual'
+    followed_up_at TEXT,                       -- date the user sent their follow-up
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -59,6 +63,7 @@ _FIELDS = (
     "date_found", "title", "company", "type", "rate", "location", "link",
     "jd_text", "fit_notes", "status", "cv_file", "cover_file", "coverage",
     "date_applied", "outcome", "source_job_id",
+    "contact_email", "contact_source", "followed_up_at",
 )
 
 
@@ -79,7 +84,11 @@ def connect(db_path: Path | str = DB_PATH) -> sqlite3.Connection:
 def _ensure_columns(conn: sqlite3.Connection) -> None:
     """Add any columns a newer version introduced to an already-existing table."""
     have = {row[1] for row in conn.execute("PRAGMA table_info(roles)")}
-    for col, ddl in [("source_job_id", "TEXT")]:
+    new_columns = [
+        ("source_job_id", "TEXT"),
+        ("contact_email", "TEXT"), ("contact_source", "TEXT"), ("followed_up_at", "TEXT"),
+    ]
+    for col, ddl in new_columns:
         if col not in have:
             conn.execute(f"ALTER TABLE roles ADD COLUMN {col} {ddl}")
 
@@ -172,6 +181,12 @@ def apply_editor_changes(conn: sqlite3.Connection, ordered_ids, edited_rows) -> 
     for idx, changes in (edited_rows or {}).items():
         role_id = ordered_ids[int(idx)]
         clean = {k: v for k, v in changes.items() if k in _FIELDS}
+        # Moving a role to Applied stamps date_applied (unless set), so the
+        # follow-up due date works without the user typing dates by hand.
+        if clean.get("status") == "Applied" and "date_applied" not in clean:
+            current = get_role(conn, int(role_id)) or {}
+            if not current.get("date_applied"):
+                clean["date_applied"] = datetime.date.today().isoformat()
         if clean:
             update_role(conn, int(role_id), **clean)
             updated += 1

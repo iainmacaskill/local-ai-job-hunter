@@ -15,11 +15,13 @@ import pandas as pd
 import streamlit as st
 
 import adzuna
+import followup
 import hunt
 import reed
 import settings
 import tracker_db
 import tracker_draft
+from cv_profile import load_profile
 from local_llm import LocalLLM
 
 SOURCES = {"Reed": reed, "Adzuna": adzuna}
@@ -30,7 +32,7 @@ st.set_page_config(page_title="CV Drafter — Tracker", page_icon="📋", layout
 # kept but not shown here. `date_found` and `coverage` are read-only (managed).
 GRID_COLUMNS = [
     "id", "date_found", "title", "company", "type", "rate", "location",
-    "status", "coverage", "date_applied", "outcome", "link", "fit_notes",
+    "status", "coverage", "date_applied", "contact_email", "outcome", "link", "fit_notes",
 ]
 READONLY_COLUMNS = ["id", "date_found", "coverage"]
 TYPE_OPTIONS = ["", "Contract", "Permanent"]
@@ -155,13 +157,76 @@ def _persist_grid_edits() -> None:
             st.toast(f"Saved {n} change(s)")
 
 
-def _metrics_row(roles) -> None:
+def _metrics_row(roles, due_count: int) -> None:
     m = tracker_db.summarise(roles)
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("To triage", m["to_triage"], help="Found, not yet reviewed")
     c2.metric("Pursuing", m["pursuing"], help="Drafting a CV / cover letter")
     c3.metric("Applied", m["applied"])
-    c4.metric("Passed", m["passed"])
+    c4.metric("Follow-ups due", due_count, help="Applied 2+ working days ago, no follow-up yet")
+    c5.metric("Passed", m["passed"])
+
+
+def _followups_due(conn, due: list[dict]) -> None:
+    """Applied roles due a follow-up: capture the contact, draft, open in email."""
+    if not due:
+        return
+    st.subheader(f"📮 Follow-ups due ({len(due)})")
+    st.caption(
+        "Applied two or more working days ago with no follow-up recorded. Drafts only: "
+        "sending happens in your own email app, never from here."
+    )
+    for r in due:
+        label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
+        with st.expander(f"{label} (applied {r.get('date_applied')})"):
+            email = st.text_input(
+                "Recruiter email", value=r.get("contact_email") or "",
+                key=f"fu_email_{r['id']}",
+                help="Parsed from the advert when published there; otherwise paste it "
+                     "from your application confirmation. Never guessed.",
+            )
+            if r.get("contact_source") == "advert" and r.get("contact_email"):
+                st.caption("Address found in the advert text.")
+            if st.button("Draft follow-up", key=f"fu_draft_{r['id']}"):
+                if email.strip() != (r.get("contact_email") or ""):
+                    tracker_db.update_role(conn, r["id"], contact_email=email.strip() or None,
+                                           contact_source="manual" if email.strip() else None)
+                try:
+                    profile = load_profile()
+                except FileNotFoundError:
+                    profile = {}
+                llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
+                if profile and llm.is_up():
+                    with st.spinner("Drafting locally..."):
+                        st.session_state[f"fu_text_{r['id']}"] = followup.draft_followup(
+                            r, profile, llm
+                        )
+                else:
+                    st.session_state[f"fu_text_{r['id']}"] = followup.template_followup(
+                        r, profile
+                    )
+            draft = st.session_state.get(f"fu_text_{r['id']}")
+            if draft:
+                st.text_input("Subject", value=draft["subject"], key=f"fu_subj_{r['id']}")
+                st.text_area("Body", value=draft["body"], height=180, key=f"fu_body_{r['id']}")
+                if draft.get("honesty") and draft["honesty"].warnings:
+                    for w in draft["honesty"].warnings:
+                        st.caption(f"review: {w}")
+                c1, c2 = st.columns(2)
+                target = st.session_state.get(f"fu_email_{r['id']}", "").strip()
+                if target:
+                    c1.link_button(
+                        "✉ Open in your email app",
+                        followup.mailto_link(
+                            target,
+                            st.session_state.get(f"fu_subj_{r['id']}", draft["subject"]),
+                            st.session_state.get(f"fu_body_{r['id']}", draft["body"]),
+                        ),
+                    )
+                if c2.button("Mark followed up", key=f"fu_done_{r['id']}"):
+                    followup.mark_followed_up(conn, r["id"])
+                    st.session_state.pop(f"fu_text_{r['id']}", None)
+                    st.rerun()
 
 
 def _download(col, path, label) -> None:
@@ -251,7 +316,9 @@ _latest_draft_panel()
 _find_roles(conn)
 _add_role_form(conn)
 
+followup.scan_contacts(conn)  # stamp advert-published emails onto contact-less roles
 roles = tracker_db.list_roles(conn)
+due = followup.list_due(conn)
 
 if not roles:
     st.info(
@@ -259,7 +326,7 @@ if not roles:
         "leaves your machine."
     )
 else:
-    _metrics_row(roles)
+    _metrics_row(roles, len(due))
     selected = st.multiselect(
         "Filter by status", tracker_db.STATUSES, default=tracker_db.STATUSES
     )
@@ -290,3 +357,4 @@ else:
         },
     )
     _draft_queue(conn, roles)
+    _followups_due(conn, due)

@@ -26,6 +26,10 @@ different path:
    blocked or flagged for your review.
 5. **You apply.** Mark the role *Applied*. From there the conversation with the
    recruiter is yours; the tool tracks the search, not the relationship.
+6. **It nudges you to follow up.** Two working days after you apply, the role
+   resurfaces with a short drafted follow-up note and a button that opens it in
+   your own email app. The recruiter's address is only ever taken from the advert
+   itself or typed in by you, never guessed, and the tool never sends anything.
 
 ![The tracker board: search and add panels at the top, the funnel metrics, and the roles the tool found, each with a status to triage](docs/tracker.png)
 
