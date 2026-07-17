@@ -3,23 +3,25 @@
 **A local, free job-hunt tool that tracks the roles you are chasing and drafts
 honest, tailored CVs for them, refusing to invent experience you do not have.**
 
-You paste a job advert; it drafts a keyword-tuned **screening CV** (`.docx`), a
-designed **interview CV** (`.pdf`) and a matching **cover letter**, in your house
-style, using only facts from your own profile, and it tells you where you genuinely
-fall short of the advert instead of papering over it. A local **tracker** keeps the
-roles you are pursuing in one place and lets you draft straight from a row.
+You paste a job advert (or let the tool **find** roles for you); it drafts a
+keyword-tuned **screening CV** (`.docx`), a designed **interview CV** (`.pdf`) and a
+matching **cover letter**, in your house style, using only facts from your own
+profile, and it tells you where you genuinely fall short of the advert instead of
+papering over it. A local **tracker** keeps the roles you are pursuing in one place,
+and an **active hunt** pulls new ones in from free job-board APIs, so the whole find,
+draft and track loop runs on your own machine.
 
 Three things make it different from the flood of AI CV tools:
 
-- **Local:** it runs against a model on your own laptop (LM Studio / Ollama). Your
-  CV, your history and the roles you are chasing never leave the machine.
-- **Free:** no cloud API, no subscription, no per-draft cost. A full CV draft is
-  about £0 and 50 seconds.
+- **Local:** your CV, your profile and your tracker live only on your machine, and
+  drafting runs against a model on your own laptop (LM Studio / Ollama).
+- **Free:** no paid API, no subscription, no per-draft cost. A full CV draft is about
+  £0 and 50 seconds, and the active hunt uses free official job-board APIs.
 - **Honest by design:** the model may only write prose. Every employer, job title
   and date comes straight from your profile, and a verification guard blocks any
   invented experience before it reaches the page.
 
-`Python · local LLM · MIT-licensed · no data leaves your device`
+`Python · local LLM · MIT-licensed · your CV never leaves your device`
 
 ## Why
 
@@ -106,8 +108,52 @@ of a loop rather than a one-off command:
   records the coverage and honesty result on the row, and gives you the finished
   files to download.
 
-Nothing here talks to the internet: the tracker, the model and your files all stay on
-your machine.
+The tracker, the model and your files all stay on your machine; the only outbound
+call is the job search below, and only when you use it.
+
+## Active hunt
+
+Rather than paste every advert by hand, let the tool **find** roles and drop the new
+ones into the tracker as *Found*. It searches free, official job-board APIs (no
+scraping, no agent, no paid service):
+
+- **Reed** ([reed.co.uk/developers](https://www.reed.co.uk/developers)): a free key,
+  returns the full job description.
+- **Adzuna** ([developer.adzuna.com](https://developer.adzuna.com)): a free app id
+  and key, returns a description snippet (paste the full advert before drafting).
+
+Put your key(s) in a gitignored `.env` in the repo root:
+
+```
+REED_API_KEY=your-key
+ADZUNA_APP_ID=your-id
+ADZUNA_APP_KEY=your-key
+```
+
+Then search from the **Find roles** panel in the tracker, or the command line:
+
+```bash
+./.venv/bin/python hunt.py --source adzuna --location London --distance 20 \
+  --keywords "ai delivery manager" --keywords "digital transformation manager"
+```
+
+Each new role is de-duplicated against what you already track, skips clearance roles
+(DV/SC/NPPV) and off-target titles, and is stored with its JD, ready to draft. A run
+reports what it did:
+
+```
+added:     12 new role(s)
+  + AI Programme Manager, Capco
+  + Delivery Manager - Digital Transformation, Government
+  + Head of PMO, Context Recruitment
+  ...
+skipped:   3 already tracked, 21 off-target titles, 1 needing clearance
+```
+
+The relevance filter (`hunt.RELEVANT_TITLE_TERMS`) keeps roles whose title mentions a
+delivery / AI / data / transformation / programme term (short terms match whole
+words, so "AI" does not match "repair"); pass `--all-titles` to keep everything. The
+only thing that leaves your machine is the search itself, not your CV or profile.
 
 ## Built by directing an AI agent
 
@@ -156,8 +202,8 @@ pbpaste > jd.txt
 (gitignored). Each run prints coverage, any keyword gaps and the honesty report. Read
 the `review` lines and check those claims before you send.
 
-Input is paste or pipe only. Fetching a JD straight from a job-board link needs the
-board scraping that is deliberately deferred to a later phase (see Roadmap).
+You do not have to paste every advert by hand: the [Active hunt](#active-hunt) finds
+roles from free job-board APIs and logs them to the tracker with their JD.
 
 ## Under the hood
 
@@ -172,6 +218,8 @@ Everything the tool needs lives in this repo; it stands alone:
 - `app.py`: the local **tracker** dashboard (Streamlit).
 - `tracker_db.py`: the local SQLite store of roles and the pipeline metrics.
 - `tracker_draft.py`: drafts the CV/cover letter for a tracked role and records the result.
+- `reed.py` / `adzuna.py`: free job-board API clients (the active-hunt sources).
+- `hunt.py`: the sweep, and its CLI: search a source, dedupe, filter, log new roles.
 
 **The local-model trick.** `qwen3.6-27b` in LM Studio is a reasoning model that
 ignores the usual API thinking switches (`/no_think`, `enable_thinking:false`,
@@ -195,8 +243,11 @@ a JSON object rather than drift into prose.
 - **Drafting** (screening CV, interview PDF, cover letter): done.
 - **Tracking** (a local dashboard of the roles you are pursuing, drafting straight
   from a row): done.
-- **Active hunt** is next: pulling roles in from job boards, which also unlocks
-  fetching a job description straight from a link.
+- **Active hunt** (find roles from the free Reed and Adzuna APIs and log them to the
+  tracker, with de-duplication, a clearance skip and a title-relevance filter): done.
+
+Next: sharper sweep relevance (tighter defaults, fuzzy de-duplication of agency
+re-posts), delete and archive in the tracker UI, and saved searches.
 
 ## License
 
