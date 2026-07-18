@@ -40,6 +40,51 @@ def workstyle_signals(*texts: str) -> list[str]:
         found.add("wfh")
     return sorted(found)
 
+
+# Day-count arithmetic: adverts state the split many ways ("2 days WFO/week",
+# "one day per week in the office", "3 days from home", "fully remote"). Office
+# days count down from a five-day week.
+_NUM = "one|two|three|four|five|[1-5]"
+_WORD_TO_N = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5}
+_FULLY_REMOTE_RE = re.compile(
+    r"\b(fully remote|100% remote|remote[- ]first|fully home[- ]?based)\b", re.IGNORECASE
+)
+_OFFICE_DAYS_RE = re.compile(
+    rf"\b({_NUM})\s*days?\s*(?:per week|a week|/week|/wk)?\s*"
+    rf"(?:wfo|in|at|on)[- ]?\s*(?:the\s+)?(?:office|site|london)?\b",
+    re.IGNORECASE,
+)
+_HOME_DAYS_RE = re.compile(
+    rf"\b({_NUM})\s*days?\s*(?:per week|a week|/week|/wk)?\s*"
+    rf"(?:from|at)?\s*(?:home|wfh|remote)\b",
+    re.IGNORECASE,
+)
+
+
+def _to_n(token: str) -> int:
+    return _WORD_TO_N.get(token.lower(), 0) or int(token)
+
+
+def home_days(*texts: str) -> int | None:
+    """Best-effort days per week at home implied by the text; None when unstated.
+
+    Explicit day counts win; a blanket remote signal with no office-day count
+    reads as five. "Hybrid" alone stays None: the split is genuinely unknown.
+    """
+    blob = " ".join(t or "" for t in texts)
+    m = _HOME_DAYS_RE.search(blob)
+    if m:
+        return max(0, min(5, _to_n(m.group(1))))
+    m = _OFFICE_DAYS_RE.search(blob)
+    if m:
+        return max(0, min(5, 5 - _to_n(m.group(1))))
+    if _FULLY_REMOTE_RE.search(blob):
+        return 5
+    signals = set(workstyle_signals(blob))
+    if signals & {"remote", "wfh", "home based"}:
+        return 5  # a plain remote signal with no stated office days
+    return None
+
 # Relevance filter for Iain's hunt: a board's keyword search (Adzuna especially) is
 # loose and returns tangential roles, so keep only those whose TITLE mentions one of
 # these delivery/leadership terms. Short/acronym terms match whole words (so "AI"
@@ -216,7 +261,11 @@ def sweep(
                 continue
 
             signals = workstyle_signals(role.title, jd)
-            style = f" | {'/'.join(signals)}" if signals else ""
+            days = home_days(role.title, jd)
+            tag = "/".join(signals)
+            if days is not None:
+                tag = f"{tag}, {days}d home" if tag else f"{days}d home"
+            style = f" | {tag}" if tag else ""
             rid = tracker_db.add_role(
                 conn,
                 title=role.title,

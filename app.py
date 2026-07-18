@@ -509,12 +509,18 @@ else:
             )
             st.rerun()
 
-    f1, f2 = st.columns([4, 1])
+    f1, f2, f3 = st.columns([3, 1.6, 1])
     selected = f1.multiselect(
         "Filter by status", tracker_db.STATUSES, default=tracker_db.STATUSES
     )
+    workstyle = f2.selectbox(
+        "Home working", ["Any", "Remote friendly", "Mostly home (4+ days a week)"],
+        help="Read from each advert's own text (snippet or fetched JD). Adverts "
+             "that do not state a split stay under Any only: unstated is not the "
+             "same as not remote.",
+    )
     passed = [r for r in roles if (r["status"] or "") == "Pass"]
-    if passed and f2.button(f"🧹 Remove {len(passed)} Pass", help="Archive every role "
+    if passed and f3.button(f"🧹 Remove {len(passed)} Pass", help="Archive every role "
                             "marked Pass to clear the list (reversible below)"):
         tracker_db.archive_roles(conn, [r["id"] for r in passed])
         st.toast(f"Archived {len(passed)} passed role(s)")
@@ -530,6 +536,14 @@ else:
         r for r in roles
         if (r["status"] or "") in selected and r["id"] not in queued_ids
     ]
+    if workstyle != "Any":
+        def _ws_ok(r):
+            texts = (r.get("title") or "", r.get("jd_text") or "", r.get("fit_notes") or "")
+            days = hunt.home_days(*texts)
+            if workstyle.startswith("Mostly"):
+                return days is not None and days >= 4
+            return days is not None or bool(hunt.workstyle_signals(*texts))
+        view = [r for r in view if _ws_ok(r)]
     # Ranked triage: scored roles first, best fit at the top; unscored keep
     # their newest-first order below (the sort is stable).
     view.sort(

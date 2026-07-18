@@ -169,13 +169,24 @@ def test_workstyle_signals_detect_and_normalise():
     assert hunt.workstyle_signals("On-site role in the office") == []
 
 
-def test_sweep_stamps_workstyle_into_fit_notes(tmp_path, monkeypatch):
+def test_sweep_stamps_workstyle_and_days_into_fit_notes(tmp_path, monkeypatch):
     conn = _db(tmp_path)
     _patch_reed(monkeypatch, [_role("111")],
                 jd="Hybrid working: two days a week in the London office, rest remote.")
     summary = hunt.sweep(conn, [{"keywords": "programme manager"}])
     r = tracker_db.get_role(conn, summary["added"][0]["id"])
-    assert r["fit_notes"].endswith("| hybrid/remote")
+    assert r["fit_notes"].endswith("| hybrid/remote, 3d home")
+
+
+def test_home_days_parses_the_common_phrasings():
+    assert hunt.home_days("Hybrid, 2 days WFO/week") == 3          # real Infosys wording
+    assert hunt.home_days("one day per week in the office") == 4
+    assert hunt.home_days("3 days from home, hybrid") == 3
+    assert hunt.home_days("Fully remote role") == 5
+    assert hunt.home_days("Remote with monthly meetups") == 5      # plain remote signal
+    assert hunt.home_days("4 days on site") == 1
+    assert hunt.home_days("Hybrid working available") is None      # split unknown
+    assert hunt.home_days("Office based in London") is None
 
 
 def test_init_db_migrates_source_job_id_onto_old_table(tmp_path):
