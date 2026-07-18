@@ -357,17 +357,25 @@ def _latest_draft_panel() -> None:
 
 
 def _draft_queue(conn, roles) -> None:
-    """Roles queued for drafting: a draft status, and no CV drafted yet."""
-    queued = [
-        r for r in roles
-        if (r["status"] or "") in tracker_draft.CV_QUEUE_STATUSES and not r.get("cv_file")
-    ]
-    if not queued:
+    """One section for the whole drafting act: draft first, review in place.
+
+    Roles in a draft status with no CV yet get the drafting form; once drafted
+    they stay here, showing the review panel (view the PDF, give feedback,
+    redraft, download) until they are marked Applied in the grid.
+    """
+    pursuing = [r for r in roles if (r["status"] or "") in tracker_draft.CV_QUEUE_STATUSES]
+    queued = [r for r in pursuing if not r.get("cv_file")]
+    drafted = [r for r in pursuing if r.get("cv_file")]
+    if not pursuing:
         return
-    st.subheader(f"✍️ To draft ({len(queued)})")
+    st.subheader(f"✍️ Drafts ({len(queued)} to draft, {len(drafted)} to review)")
+    st.caption(
+        "Draft below; each finished draft stays here to check, refine and download. "
+        "Mark the role Applied in the grid once you have submitted it."
+    )
     llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
     up = llm.is_up()
-    if not up:
+    if queued and not up:
         st.warning(
             f"Local model not reachable at {settings.LLM_BASE_URL}. "
             "Start LM Studio's local server to draft."
@@ -441,23 +449,11 @@ def _draft_queue(conn, roles) -> None:
                 }
                 st.rerun()
 
-
-def _review_drafts(conn, roles) -> None:
-    """View, give feedback on, and download the documents for drafted roles."""
-    drafted = [
-        r for r in roles
-        if r.get("cv_file") and (r["status"] or "") in tracker_draft.CV_QUEUE_STATUSES
-    ]
-    if not drafted:
-        return
-    st.subheader(f"📄 Review drafts ({len(drafted)})")
-    st.caption(
-        "Check the CV, ask for changes, download, then mark the role Applied in the "
-        "grid once you have submitted it."
-    )
+    # Review lives inside the same section: a drafted role stays here (nested
+    # under the drafting flow) until it is marked Applied.
     for r in drafted:
         label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
-        with st.expander(f"{label} (coverage {r.get('coverage')}%)"):
+        with st.expander(f"📄 {label} (drafted, coverage {r.get('coverage')}%)"):
             pdf_path = tracker_draft.interview_pdf_path(r)
             if pdf_path and pdf_path.exists():
                 # Inline preview without extra dependencies: the browser's own
@@ -662,7 +658,6 @@ else:
         st.rerun()
 
     _draft_queue(conn, roles)
-    _review_drafts(conn, roles)
     _followups_due(conn, due)
 
 _archive_panel(conn)
