@@ -30,6 +30,33 @@ _BLOCK_TAGS = {"p", "div", "li", "br", "tr", "h1", "h2", "h3", "h4", "h5", "h6",
 
 MIN_READABLE_CHARS = 400  # below this the page almost certainly did not carry the advert
 
+# Known page chrome that survives extraction (alert popups, breadcrumbs, footers).
+# Deliberately conservative: a line is dropped only when the WHOLE line matches,
+# so advert content that merely mentions these words is never eaten.
+_BOILERPLATE_LINE_RE = re.compile(
+    r"^(?:"
+    r"(?:❮|back to last search)(?:\s*(?:❮|back to last search))*"
+    r"|no thanks.{0,40}"
+    r"|apply for this job|save this job|apply now"
+    r"|create (?:an |a job )?alert|get new jobs for this search by email.{0,20}"
+    r"|by creating an alert.{0,120}"
+    r"|country selection|sign in|register|❮"
+    r")$",
+    re.IGNORECASE,
+)
+
+
+def _drop_boilerplate(text: str) -> str:
+    kept = []
+    for line in text.splitlines():
+        s = line.strip()
+        if _BOILERPLATE_LINE_RE.match(s):
+            continue
+        if "australiaaustria" in s.replace(" ", "").lower():  # the country-picker blob
+            continue
+        kept.append(line)
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(kept)).strip()
+
 
 class FetchError(RuntimeError):
     """Raised when the advert text could not be fetched or read."""
@@ -90,7 +117,7 @@ def fetch_advert_text(url: str, timeout: int = 20) -> str:
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise FetchError(f"could not reach the link: {exc}") from exc
 
-    text = extract_text(html)
+    text = _drop_boilerplate(extract_text(html))
     if len(text) < MIN_READABLE_CHARS:
         raise FetchError(
             "the page returned too little readable text (it is probably rendered "

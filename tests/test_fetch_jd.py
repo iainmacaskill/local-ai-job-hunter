@@ -60,6 +60,29 @@ class _FakeHeaders:
         return "utf-8"
 
 
+def test_boilerplate_lines_are_dropped_but_content_mentioning_them_is_kept():
+    text = "\n".join([
+        "❮ back to last search",
+        "Programme Manager",
+        "No thanks, take me to the job",
+        "You will apply for this job through our governance process.",  # content, kept
+        "Apply for this job",
+        "By creating an alert, you agree to our T&Cs and Privacy Notice, and Cookie Use.",
+        "Country selection",
+        "AustraliaAustriaBelgiumBrazilCanadaFrance",
+        "Lead the delivery of the AI programme.",
+    ])
+    cleaned = fetch_jd._drop_boilerplate(text)
+    assert "back to last search" not in cleaned
+    assert "No thanks" not in cleaned
+    assert "By creating an alert" not in cleaned
+    assert "Country selection" not in cleaned
+    assert "AustraliaAustria" not in cleaned
+    assert "governance process" in cleaned          # full sentences survive
+    assert "Lead the delivery" in cleaned
+    assert "Programme Manager" in cleaned
+
+
 def test_fetch_returns_text_for_a_real_looking_page(monkeypatch):
     monkeypatch.setattr(fetch_jd.urllib.request, "urlopen",
                         lambda req, timeout=0: _FakeResp(PAGE))
