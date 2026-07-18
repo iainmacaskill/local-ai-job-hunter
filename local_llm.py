@@ -97,6 +97,17 @@ class LocalLLM:
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 body = json.loads(resp.read().decode("utf-8"), strict=False)
+        except urllib.error.HTTPError as exc:
+            # The endpoint answered with an error: surface its body, which is
+            # where LM Studio explains itself (e.g. "insufficient system
+            # resources" when another loaded model is hogging the memory).
+            try:
+                detail = exc.read().decode("utf-8", "replace")[:300]
+            except OSError:
+                detail = ""
+            raise LocalLLMError(
+                f"endpoint returned HTTP {exc.code}: {detail or exc.reason}"
+            ) from exc
         except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
             raise LocalLLMError(f"local endpoint unreachable at {self.base_url}: {exc}") from exc
         return (body["choices"][0].get("text") or "").strip()
