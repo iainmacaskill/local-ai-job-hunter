@@ -378,12 +378,11 @@ def _draft_queue(conn, roles) -> None:
         label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
         with st.expander(label, expanded=True):
             if r.get("link"):
-                lc1, lc2 = st.columns([4, 1])
-                lc1.markdown(f"Link - [{r['link']}]({r['link']})")
-                if lc2.button("⬇ Fetch advert text", key=f"fetch_{r['id']}",
-                              help="Fetches the page at the link and drops its "
-                                   "readable text into the box below for you to "
-                                   "clean up. Some pages cannot be read this way."):
+                st.markdown(f"Link - [{r['link']}]({r['link']})")
+                if st.button("⬇ Fetch advert text", key=f"fetch_{r['id']}",
+                             help="Fetches the page at the link and drops its "
+                                  "readable text into the box below for you to "
+                                  "clean up. Some pages cannot be read this way."):
                     try:
                         st.session_state[f"jd_{r['id']}"] = fetch_jd.fetch_advert_text(
                             r["link"]
