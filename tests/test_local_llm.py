@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 import local_llm
@@ -35,6 +37,30 @@ def test_extract_json_rejects_non_object():
 def test_is_up_false_on_dead_port():
     # nothing should be listening here
     assert LocalLLM(base_url="http://127.0.0.1:9").is_up(connect_timeout=0.3) is False
+
+
+def test_list_models_empty_on_dead_endpoint():
+    assert LocalLLM(base_url="http://127.0.0.1:9").list_models(connect_timeout=0.3) == []
+
+
+def test_list_models_parses_and_sorts_ids(monkeypatch):
+    class FakeResp:
+        def __init__(self, payload):
+            self._body = json.dumps(payload).encode("utf-8")
+
+        def read(self):
+            return self._body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    payload = {"data": [{"id": "qwen/qwen3.6-27b"}, {"id": "qwen/qwen3.5-8b"}, {"x": 1}]}
+    monkeypatch.setattr(local_llm.urllib.request, "urlopen",
+                        lambda req, timeout=0: FakeResp(payload))
+    assert LocalLLM().list_models() == ["qwen/qwen3.5-8b", "qwen/qwen3.6-27b"]
 
 
 # --- live integration: skips unless a local endpoint is actually running --- #

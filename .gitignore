@@ -13,3 +13,6 @@ outputs/
 
 # Local tracker database (WAL sidecars too)
 tracker.db*
+
+# Triage-comparison outputs cite real profile facts in their reasons
+evals/results/triage-*
