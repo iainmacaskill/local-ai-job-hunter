@@ -16,3 +16,6 @@ tracker.db*
 
 # Triage-comparison outputs cite real profile facts in their reasons
 evals/results/triage-*
+
+# Machine-local Streamlit config (network binding stays out of the public repo)
+.streamlit/
