@@ -359,11 +359,13 @@ def _latest_draft_panel() -> None:
 
 
 def _draft_queue(conn, roles) -> None:
-    """One section for the whole drafting act: draft first, review in place.
+    """One card per pursued role, kept whole through the application act.
 
-    Roles in a draft status with no CV yet get the drafting form; once drafted
-    they stay here, showing the review panel (view the PDF, give feedback,
-    redraft, download) until they are marked Applied in the grid.
+    The reference material (link, fetch, job description) never disappears:
+    before drafting the card ends with the drafting controls, and after
+    drafting the review block (PDF, downloads, feedback, redraft) is appended
+    beneath the same material. The card leaves this section only when the role
+    is marked Applied in the grid.
     """
     pursuing = [r for r in roles if (r["status"] or "") in tracker_draft.CV_QUEUE_STATUSES]
     queued = [r for r in pursuing if not r.get("cv_file")]
@@ -372,21 +374,26 @@ def _draft_queue(conn, roles) -> None:
         return
     st.subheader(f"✍️ Drafts ({len(queued)} to draft, {len(drafted)} to review)")
     st.caption(
-        "Draft below; each finished draft stays here to check, refine and download. "
-        "Mark the role Applied in the grid once you have submitted it."
+        "Each role keeps its advert alongside its draft. Draft, review against the "
+        "advert, refine and download here; mark the role Applied in the grid once "
+        "you have submitted it."
     )
     llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
     up = llm.is_up()
-    if queued and not up:
+    if not up:
         st.warning(
             f"Local model not reachable at {settings.LLM_BASE_URL}. "
-            "Start LM Studio's local server to draft."
+            "Start LM Studio's local server to draft or redraft."
         )
     cv_only = "Screening CV and interview PDF"
     cv_cover = "Screening CV, interview PDF and a cover letter"
-    for r in queued:
+    for r in pursuing:
+        has_draft = bool(r.get("cv_file"))
         label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
-        with st.expander(label, expanded=True):
+        if has_draft:
+            label = f"📄 {label} (drafted, coverage {r.get('coverage')}%)"
+        with st.expander(label, expanded=not has_draft):
+            # --- reference material: always present ------------------------ #
             if r.get("link"):
                 st.markdown(f"Link - [{r['link']}]({r['link']})")
                 if st.button("⬇ Fetch advert text", key=f"fetch_{r['id']}",
@@ -416,46 +423,49 @@ def _draft_queue(conn, roles) -> None:
                 "Job description", value=r.get("jd_text") or "", height=140,
                 key=f"jd_{r['id']}", label_visibility="collapsed",
             )
-            cover = r["status"] == "Draft CV & Cover Letter"
-            choice = st.selectbox(
-                "Will draft", [cv_only, cv_cover], index=1 if cover else 0,
-                key=f"will_{r['id']}",
-                help="Switch before drafting if the application unexpectedly asks "
-                     "for a cover letter (or does not need one).",
-            )
-            if st.button("Draft now", key=f"draft_{r['id']}", disabled=not up, type="primary"):
-                if not jd.strip():
-                    st.error("Paste the job description first.")
-                    st.stop()
-                wanted = "Draft CV & Cover Letter" if choice == cv_cover else "Draft CV"
-                tracker_db.update_role(conn, r["id"], jd_text=jd.strip(), status=wanted)
-                role = dict(r)
-                role["jd_text"] = jd.strip()
-                role["status"] = wanted
-                with st.spinner("Drafting locally, about a minute..."):
-                    try:
-                        out = tracker_draft.draft_for_role(conn, role, llm=llm)
-                    except Exception as exc:  # noqa: BLE001 - surface any failure to the user
-                        st.error(f"Drafting failed: {exc}")
-                        st.stop()
-                cv = out["cv"]
-                st.session_state["last_draft"] = {
-                    "title": r["title"],
-                    "coverage": cv["coverage"]["pct"],
-                    "gaps": cv["coverage"]["missing"],
-                    "honesty": cv["honesty"].summary(),
-                    "warnings": list(cv["honesty"].warnings),
-                    "cv_path": str(cv["docx"]),
-                    "pdf_path": str(cv["pdf"]) if cv.get("pdf") else None,
-                    "cover_path": str(out["cover"]["docx"]) if out.get("cover") else None,
-                }
-                st.rerun()
 
-    # Review lives inside the same section: a drafted role stays here (nested
-    # under the drafting flow) until it is marked Applied.
-    for r in drafted:
-        label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
-        with st.expander(f"📄 {label} (drafted, coverage {r.get('coverage')}%)"):
+            if not has_draft:
+                # --- drafting controls ------------------------------------ #
+                cover = r["status"] == "Draft CV & Cover Letter"
+                choice = st.selectbox(
+                    "Will draft", [cv_only, cv_cover], index=1 if cover else 0,
+                    key=f"will_{r['id']}",
+                    help="Switch before drafting if the application unexpectedly "
+                         "asks for a cover letter (or does not need one).",
+                )
+                if st.button("Draft now", key=f"draft_{r['id']}", disabled=not up,
+                             type="primary"):
+                    if not jd.strip():
+                        st.error("Paste the job description first.")
+                        st.stop()
+                    wanted = "Draft CV & Cover Letter" if choice == cv_cover else "Draft CV"
+                    tracker_db.update_role(conn, r["id"], jd_text=jd.strip(), status=wanted)
+                    role = dict(r)
+                    role["jd_text"] = jd.strip()
+                    role["status"] = wanted
+                    with st.spinner("Drafting locally, about a minute..."):
+                        try:
+                            out = tracker_draft.draft_for_role(conn, role, llm=llm)
+                        except Exception as exc:  # noqa: BLE001 - surface any failure
+                            st.error(f"Drafting failed: {exc}")
+                            st.stop()
+                    cv = out["cv"]
+                    st.session_state["last_draft"] = {
+                        "title": r["title"],
+                        "coverage": cv["coverage"]["pct"],
+                        "gaps": cv["coverage"]["missing"],
+                        "honesty": cv["honesty"].summary(),
+                        "warnings": list(cv["honesty"].warnings),
+                        "cv_path": str(cv["docx"]),
+                        "pdf_path": str(cv["pdf"]) if cv.get("pdf") else None,
+                        "cover_path": str(out["cover"]["docx"]) if out.get("cover")
+                                      else None,
+                    }
+                    st.rerun()
+                continue
+
+            # --- review block, beneath the same reference material --------- #
+            st.divider()
             pdf_path = tracker_draft.interview_pdf_path(r)
             if pdf_path and pdf_path.exists():
                 # Inline preview without extra dependencies: the browser's own
@@ -485,20 +495,18 @@ def _draft_queue(conn, roles) -> None:
                             "make the governance experience more prominent.",
                 help="Feedback steers emphasis and wording. It cannot add experience "
                      "you do not have: facts still come from your profile and every "
-                     "redraft passes the honesty guard.",
+                     "redraft passes the honesty guard. Leave it empty to redraft "
+                     "against an updated job description alone.",
             )
-            if st.button("🔁 Redraft with this feedback", key=f"redraft_{r['id']}"):
-                if not feedback.strip():
-                    st.error("Say what should change first.")
-                    st.stop()
-                llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
-                if not llm.is_up():
-                    st.error("Local model is not reachable; start LM Studio's server.")
-                    st.stop()
+            if st.button("🔁 Redraft", key=f"redraft_{r['id']}", disabled=not up):
+                if jd.strip():
+                    tracker_db.update_role(conn, r["id"], jd_text=jd.strip())
+                role = dict(r)
+                role["jd_text"] = jd.strip() or r.get("jd_text")
                 with st.spinner("Redrafting locally, about a minute..."):
                     try:
                         out = tracker_draft.draft_for_role(
-                            conn, r, llm=llm, guidance=feedback.strip()
+                            conn, role, llm=llm, guidance=feedback.strip() or None
                         )
                     except Exception as exc:  # noqa: BLE001 - surface any failure
                         st.error(f"Redraft failed: {exc}")
