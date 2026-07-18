@@ -34,8 +34,8 @@ st.set_page_config(page_title="CV Drafter — Tracker", page_icon="📋", layout
 # Columns shown in the grid, in order. The rest (jd_text, cv_file, timestamps) are
 # kept but not shown here. `date_found` and `coverage` are read-only (managed).
 GRID_COLUMNS = [
-    "id", "date_found", "title", "open", "company", "type", "rate", "location",
-    "status", "fit_score", "fit_reason", "coverage", "date_applied",
+    "id", "status", "title", "open", "type", "rate", "location", "company",
+    "date_found", "fit_score", "fit_reason", "coverage", "date_applied",
     "contact_email", "outcome", "link", "fit_notes",
 ]
 READONLY_COLUMNS = ["id", "date_found", "open", "coverage", "fit_score", "fit_reason"]
