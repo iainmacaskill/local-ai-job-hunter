@@ -8,6 +8,7 @@ local model. Starts empty; nothing leaves your machine. Run with:
 
 from __future__ import annotations
 
+import base64
 import os
 from pathlib import Path
 
@@ -23,7 +24,7 @@ import settings
 import tracker_db
 import tracker_draft
 import triage
-from cv_profile import load_profile
+from cv_profile import OUTPUT_DIR, load_profile
 from local_llm import LocalLLM
 
 # Adzuna first: its keys are issued instantly, so it is the default source.
@@ -442,6 +443,74 @@ def _draft_queue(conn, roles) -> None:
                 st.rerun()
 
 
+def _review_drafts(conn, roles) -> None:
+    """View, give feedback on, and download the documents for drafted roles."""
+    drafted = [
+        r for r in roles
+        if r.get("cv_file") and (r["status"] or "") in tracker_draft.CV_QUEUE_STATUSES
+    ]
+    if not drafted:
+        return
+    st.subheader(f"📄 Review drafts ({len(drafted)})")
+    st.caption(
+        "Check the CV, ask for changes, download, then mark the role Applied in the "
+        "grid once you have submitted it."
+    )
+    for r in drafted:
+        label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
+        with st.expander(f"{label} (coverage {r.get('coverage')}%)"):
+            pdf_path = tracker_draft.interview_pdf_path(r)
+            if pdf_path and pdf_path.exists():
+                # Inline preview without extra dependencies: the browser's own
+                # PDF viewer in an embed fed by a data URI.
+                b64 = base64.b64encode(pdf_path.read_bytes()).decode("ascii")
+                st.markdown(
+                    f'<embed src="data:application/pdf;base64,{b64}" '
+                    f'type="application/pdf" width="100%" height="560">',
+                    unsafe_allow_html=True,
+                )
+            elif pdf_path:
+                st.caption("No interview PDF was rendered for this draft.")
+
+            c1, c2, c3 = st.columns(3)
+            _download(c1, str(OUTPUT_DIR / r["cv_file"]), "⬇ Screening CV (.docx)")
+            if pdf_path and pdf_path.exists():
+                _download(c2, str(pdf_path), "⬇ Interview CV (.pdf)")
+            if r.get("cover_file"):
+                _download(c3, str(OUTPUT_DIR / r["cover_file"]), "⬇ Cover letter (.docx)")
+
+            feedback = st.text_area(
+                "What should change?", key=f"fb_{r['id']}",
+                placeholder="e.g. Lead with the NHS AI programme in the summary, and "
+                            "make the governance experience more prominent.",
+                help="Feedback steers emphasis and wording. It cannot add experience "
+                     "you do not have: facts still come from your profile and every "
+                     "redraft passes the honesty guard.",
+            )
+            if st.button("🔁 Redraft with this feedback", key=f"redraft_{r['id']}"):
+                if not feedback.strip():
+                    st.error("Say what should change first.")
+                    st.stop()
+                llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
+                if not llm.is_up():
+                    st.error("Local model is not reachable; start LM Studio's server.")
+                    st.stop()
+                with st.spinner("Redrafting locally, about a minute..."):
+                    try:
+                        out = tracker_draft.draft_for_role(
+                            conn, r, llm=llm, guidance=feedback.strip()
+                        )
+                    except Exception as exc:  # noqa: BLE001 - surface any failure
+                        st.error(f"Redraft failed: {exc}")
+                        st.stop()
+                rep = out["cv"]["honesty"]
+                st.toast(
+                    f"Redrafted: coverage {out['cv']['coverage']['pct']}%, "
+                    f"honesty {rep.summary()}"
+                )
+                st.rerun()
+
+
 def _archive_panel(conn) -> None:
     """Archived roles: restore them, or permanently delete after a confirm tick."""
     archived = tracker_db.list_archived(conn)
@@ -594,6 +663,7 @@ else:
         st.rerun()
 
     _draft_queue(conn, roles)
+    _review_drafts(conn, roles)
     _followups_due(conn, due)
 
 _archive_panel(conn)

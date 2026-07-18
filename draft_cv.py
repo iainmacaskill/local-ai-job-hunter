@@ -67,8 +67,19 @@ def extract_keywords(jd_text: str, llm) -> list[str]:
     return [str(k).strip() for k in out.get("keywords", []) if str(k).strip()]
 
 
+def _guidance_line(guidance: str | None) -> str:
+    """User feedback folded into a prompt; it may steer emphasis, never facts."""
+    if not (guidance or "").strip():
+        return ""
+    return (
+        f"USER FEEDBACK on the previous draft, to apply where it does not conflict "
+        f"with the candidate facts (facts always win): {guidance.strip()}\n\n"
+    )
+
+
 def write_head(
-    jd_text: str, profile: dict, role_title: str | None, llm, keywords: list[str] | None = None
+    jd_text: str, profile: dict, role_title: str | None, llm,
+    keywords: list[str] | None = None, guidance: str | None = None,
 ) -> dict:
     kw_line = (
         f"Where the candidate genuinely matches, use these exact advert terms in the "
@@ -87,6 +98,7 @@ def write_head(
         user=(
             f"JOB ADVERT:\n{jd_text}\n\n"
             f"{kw_line}"
+            f"{_guidance_line(guidance)}"
             f"CANDIDATE FACTS:\n{_facts_block(profile)}\n\n"
             f"Target title to aim for: {role_title or '(use the advert job title)'}"
         ),
@@ -99,7 +111,10 @@ def write_head(
     }
 
 
-def rewrite_bullets(jd_text: str, job: dict, llm, keywords: list[str] | None = None) -> list[str]:
+def rewrite_bullets(
+    jd_text: str, job: dict, llm, keywords: list[str] | None = None,
+    guidance: str | None = None,
+) -> list[str]:
     """Rewrite one role's bullets to mirror the JD, using only that role's facts."""
     existing = [b for b in job.get("bullets", []) if str(b).strip()]
     if len(existing) < 2:
@@ -120,6 +135,7 @@ def rewrite_bullets(jd_text: str, job: dict, llm, keywords: list[str] | None = N
         user=(
             f"JOB ADVERT (for language to mirror):\n{jd_text[:1200]}\n\n"
             f"{kw_line}"
+            f"{_guidance_line(guidance)}"
             f"ROLE: {job.get('title')} at {job.get('company')} ({job.get('dates')})\n"
             f"EXISTING BULLETS:\n- " + "\n- ".join(existing)
         ),
@@ -130,15 +146,16 @@ def rewrite_bullets(jd_text: str, job: dict, llm, keywords: list[str] | None = N
 
 
 def build_payload(
-    jd_text: str, profile: dict, role_title: str | None, llm, keywords: list[str] | None = None
+    jd_text: str, profile: dict, role_title: str | None, llm,
+    keywords: list[str] | None = None, guidance: str | None = None,
 ) -> dict:
-    head = write_head(jd_text, profile, role_title, llm, keywords)
+    head = write_head(jd_text, profile, role_title, llm, keywords, guidance)
     experience = [
         {
             "title": job.get("title"),
             "company": job.get("company"),
             "dates": job.get("dates"),
-            "bullets": rewrite_bullets(jd_text, job, llm, keywords),
+            "bullets": rewrite_bullets(jd_text, job, llm, keywords, guidance),
         }
         for job in profile.get("jobs", [])
     ]
@@ -175,17 +192,21 @@ def draft_screening_cv(
     llm=None,
     out_dir: Path | None = None,
     render_pdf: bool = True,
+    guidance: str | None = None,
 ) -> dict:
     """Draft + render a screening CV (.docx, and a designed .pdf by default).
 
-    Returns paths, payload, coverage, keywords and the honesty report.
+    ``guidance`` carries the user's feedback on a previous draft; it steers
+    emphasis and wording only, never the facts, and the honesty guard verifies
+    the result as usual. Returns paths, payload, coverage, keywords and the
+    honesty report.
     """
     profile = profile or load_profile()
     llm = llm or LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
     out_dir = Path(out_dir) if out_dir else OUTPUT_DIR
 
     jd_keywords = extract_keywords(jd_text, llm)
-    payload = build_payload(jd_text, profile, role_title, llm, jd_keywords)
+    payload = build_payload(jd_text, profile, role_title, llm, jd_keywords, guidance)
     report = honesty.verify(payload, profile)  # S3: verify before we render
     role = {"title": role_title or payload["target_title"]}
     docx = cv_render.generate_screening_cv(role, payload, profile, out_dir=out_dir)
