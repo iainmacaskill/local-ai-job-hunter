@@ -359,32 +359,43 @@ def _draft_queue(conn, roles) -> None:
             f"Local model not reachable at {settings.LLM_BASE_URL}. "
             "Start LM Studio's local server to draft."
         )
+    cv_only = "Screening CV and interview PDF"
+    cv_cover = "Screening CV, interview PDF and a cover letter"
     for r in queued:
         label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
         with st.expander(label, expanded=True):
             if r.get("link"):
                 st.markdown(f"Link - [{r['link']}]({r['link']})")
-            jd = st.text_area(
-                "Job description", value=r.get("jd_text") or "", height=140, key=f"jd_{r['id']}"
-            )
-            if tracker_draft.looks_like_snippet(jd):
+            st.markdown("**Job description**")
+            # The warning sits above the box (reading order is top-down), so it
+            # checks the box's live value from session state, not the stale row.
+            jd_current = st.session_state.get(f"jd_{r['id']}", r.get("jd_text") or "")
+            if tracker_draft.looks_like_snippet(jd_current):
                 st.warning(
                     "This looks like a search-result snippet, not the full advert. "
-                    "Paste the full advert above for a proper draft and an honest "
+                    "Paste the full advert below for a proper draft and an honest "
                     "coverage score."
                 )
+            jd = st.text_area(
+                "Job description", value=r.get("jd_text") or "", height=140,
+                key=f"jd_{r['id']}", label_visibility="collapsed",
+            )
             cover = r["status"] == "Draft CV & Cover Letter"
-            st.caption(
-                "Will draft: screening CV and interview PDF"
-                + (", plus a cover letter." if cover else ".")
+            choice = st.selectbox(
+                "Will draft", [cv_only, cv_cover], index=1 if cover else 0,
+                key=f"will_{r['id']}",
+                help="Switch before drafting if the application unexpectedly asks "
+                     "for a cover letter (or does not need one).",
             )
             if st.button("Draft now", key=f"draft_{r['id']}", disabled=not up, type="primary"):
                 if not jd.strip():
                     st.error("Paste the job description first.")
                     st.stop()
-                tracker_db.update_role(conn, r["id"], jd_text=jd.strip())
+                wanted = "Draft CV & Cover Letter" if choice == cv_cover else "Draft CV"
+                tracker_db.update_role(conn, r["id"], jd_text=jd.strip(), status=wanted)
                 role = dict(r)
                 role["jd_text"] = jd.strip()
+                role["status"] = wanted
                 with st.spinner("Drafting locally, about a minute..."):
                     try:
                         out = tracker_draft.draft_for_role(conn, role, llm=llm)
