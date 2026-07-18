@@ -88,6 +88,24 @@ def test_redraft_guidance_reaches_the_prompts_and_restamps(tmp_path):
     assert out["cv"]["honesty"] is not None       # guard still verifies redrafts
 
 
+def test_same_title_at_two_companies_never_collides(tmp_path):
+    """Two 'Programme Manager' roles at different employers must produce
+    different files, or the second draft silently overwrites the first."""
+    conn = tracker_db.connect(tmp_path / "t.db")
+    tracker_db.init_db(conn)
+    files = []
+    for company in ("Prism Digital", "Pearson Whiffin"):
+        rid = tracker_db.add_role(conn, title="Programme Manager", company=company,
+                                  jd_text=JD)
+        tracker_db.update_role(conn, rid, status="Draft CV")
+        role = tracker_db.get_role(conn, rid)
+        out = tracker_draft.draft_for_role(conn, role, llm=FakeLLM(), out_dir=tmp_path,
+                                           render_pdf=False)
+        files.append(out["cv"]["docx"].name)
+    assert files[0] != files[1]
+    assert "Prism Digital" in files[0] and "Pearson Whiffin" in files[1]
+
+
 def test_interview_pdf_path_derives_from_cv_file(tmp_path):
     role = {"cv_file": "Alex Rivera - Screening - AI Delivery Manager.docx"}
     p = tracker_draft.interview_pdf_path(role, out_dir=tmp_path)

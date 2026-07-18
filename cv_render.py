@@ -98,7 +98,10 @@ def generate_screening_cv(role: dict, screening: dict, profile: dict, out_dir=No
     out_dir = Path(out_dir) if out_dir else OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     target = (screening.get("target_title") or role.get("title") or "Role").strip()
-    path = out_dir / f"{profile.get('name', 'CV')} - Screening - {_safe(target)}.docx"
+    # The company disambiguates the filename: two "Programme Manager" roles at
+    # different employers must never overwrite each other's drafts.
+    suffix = f" ({_safe(role['company'])})" if role.get("company") else ""
+    path = out_dir / f"{profile.get('name', 'CV')} - Screening - {_safe(target)}{suffix}.docx"
 
     doc = Document()
     normal = doc.styles["Normal"]

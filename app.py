@@ -330,12 +330,14 @@ def _followups_due(conn, due: list[dict]) -> None:
                     st.rerun()
 
 
-def _download(col, path, label) -> None:
+def _download(col, path, label, key) -> None:
+    """A download button with an explicit unique key: filenames can collide
+    (two drafted roles can share a title), widget keys must not."""
     if not path:
         return
     p = Path(path)
     if p.exists():
-        col.download_button(label, p.read_bytes(), file_name=p.name, key=f"dl_{p.name}")
+        col.download_button(label, p.read_bytes(), file_name=p.name, key=key)
 
 
 def _latest_draft_panel() -> None:
@@ -351,9 +353,9 @@ def _latest_draft_panel() -> None:
         if d.get("gaps"):
             st.caption(f"keyword gaps: {', '.join(d['gaps'])}")
         c1, c2, c3 = st.columns(3)
-        _download(c1, d.get("cv_path"), "⬇ Screening CV (.docx)")
-        _download(c2, d.get("pdf_path"), "⬇ Interview CV (.pdf)")
-        _download(c3, d.get("cover_path"), "⬇ Cover letter (.docx)")
+        _download(c1, d.get("cv_path"), "⬇ Screening CV (.docx)", key="last_dl_cv")
+        _download(c2, d.get("pdf_path"), "⬇ Interview CV (.pdf)", key="last_dl_pdf")
+        _download(c3, d.get("cover_path"), "⬇ Cover letter (.docx)", key="last_dl_cover")
 
 
 def _draft_queue(conn, roles) -> None:
@@ -468,11 +470,14 @@ def _draft_queue(conn, roles) -> None:
                 st.caption("No interview PDF was rendered for this draft.")
 
             c1, c2, c3 = st.columns(3)
-            _download(c1, str(OUTPUT_DIR / r["cv_file"]), "⬇ Screening CV (.docx)")
+            _download(c1, str(OUTPUT_DIR / r["cv_file"]), "⬇ Screening CV (.docx)",
+                      key=f"dl_cv_{r['id']}")
             if pdf_path and pdf_path.exists():
-                _download(c2, str(pdf_path), "⬇ Interview CV (.pdf)")
+                _download(c2, str(pdf_path), "⬇ Interview CV (.pdf)",
+                          key=f"dl_pdf_{r['id']}")
             if r.get("cover_file"):
-                _download(c3, str(OUTPUT_DIR / r["cover_file"]), "⬇ Cover letter (.docx)")
+                _download(c3, str(OUTPUT_DIR / r["cover_file"]), "⬇ Cover letter (.docx)",
+                          key=f"dl_cover_{r['id']}")
 
             feedback = st.text_area(
                 "What should change?", key=f"fb_{r['id']}",

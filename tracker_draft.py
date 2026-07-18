@@ -60,7 +60,8 @@ def draft_for_role(conn, role: dict, llm=None, out_dir=None, render_pdf: bool = 
     title = role.get("title")
 
     cv = draft_cv.draft_screening_cv(jd, role_title=title, llm=llm, out_dir=out_dir,
-                                     render_pdf=render_pdf, guidance=guidance)
+                                     render_pdf=render_pdf, guidance=guidance,
+                                     company=role.get("company"))
     fields = {
         "cv_file": cv["docx"].name,
         "coverage": cv["coverage"]["pct"],

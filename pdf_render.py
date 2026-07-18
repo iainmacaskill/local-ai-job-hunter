@@ -146,7 +146,9 @@ def generate_interview_cv(role: dict, screening: dict, profile: dict, out_dir=No
     out_dir = Path(out_dir) if out_dir else OUTPUT_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
     target = (screening.get("target_title") or role.get("title") or "Role").strip()
-    stem = f"{profile.get('name', 'CV')} - Interview - {_safe(target)}"
+    # Same disambiguation as the screening CV, so the two documents pair up.
+    suffix = f" ({_safe(role['company'])})" if role.get("company") else ""
+    stem = f"{profile.get('name', 'CV')} - Interview - {_safe(target)}{suffix}"
     html_path = out_dir / f"{stem}.html"
     pdf_path = out_dir / f"{stem}.pdf"
     html_path.write_text(render_html(role, profile, screening), encoding="utf-8")
