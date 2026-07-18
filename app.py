@@ -597,7 +597,7 @@ else:
             )
             st.rerun()
 
-    f1, f2, f3 = st.columns([3, 1.6, 1])
+    f1, f2 = st.columns([3, 1.6])
     selected = f1.multiselect(
         "Filter by status", tracker_db.STATUSES, default=tracker_db.STATUSES
     )
@@ -607,12 +607,6 @@ else:
              "that do not state a split stay under Any only: unstated is not the "
              "same as not remote.",
     )
-    passed = [r for r in roles if (r["status"] or "") == "Pass"]
-    if passed and f3.button(f"🧹 Remove {len(passed)} Pass", help="Archive every role "
-                            "marked Pass to clear the list (reversible below)"):
-        tracker_db.archive_roles(conn, [r["id"] for r in passed])
-        st.toast(f"Archived {len(passed)} passed role(s)")
-        st.rerun()
 
     # Roles sitting in the To-draft queue below are hidden here to keep the list
     # clean; they return to the grid once drafted, ready to be marked Applied.
@@ -669,7 +663,15 @@ else:
             "fit_notes": st.column_config.TextColumn("Fit notes", width="large"),
         },
     )
-    if st.button(
+    b1, b2, _spacer = st.columns([1, 1, 2])
+    passed = [r for r in roles if (r["status"] or "") == "Pass"]
+    if passed and b1.button(f"🧹 Remove {len(passed)} Pass",
+                            help="Archive every role marked Pass to clear the list "
+                                 "(reversible below)"):
+        tracker_db.archive_roles(conn, [r["id"] for r in passed])
+        st.toast(f"Archived {len(passed)} passed role(s)")
+        st.rerun()
+    if b2.button(
         "🧹 Archive duplicate re-posts",
         help="Same vacancy posted again (by another agency, or with the employer "
              "spelled differently). Keeps the earliest; archiving is reversible below.",
