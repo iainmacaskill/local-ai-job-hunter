@@ -15,6 +15,7 @@ import pandas as pd
 import streamlit as st
 
 import adzuna
+import fetch_jd
 import followup
 import hunt
 import reed
@@ -376,16 +377,30 @@ def _draft_queue(conn, roles) -> None:
         label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
         with st.expander(label, expanded=True):
             if r.get("link"):
-                st.markdown(f"Link - [{r['link']}]({r['link']})")
+                lc1, lc2 = st.columns([4, 1])
+                lc1.markdown(f"Link - [{r['link']}]({r['link']})")
+                if lc2.button("⬇ Fetch advert text", key=f"fetch_{r['id']}",
+                              help="Fetches the page at the link and drops its "
+                                   "readable text into the box below for you to "
+                                   "clean up. Some pages cannot be read this way."):
+                    try:
+                        st.session_state[f"jd_{r['id']}"] = fetch_jd.fetch_advert_text(
+                            r["link"]
+                        )
+                        st.toast("Advert text fetched. Tidy it up before drafting.")
+                    except fetch_jd.FetchError as exc:
+                        st.warning(f"Could not fetch the advert: {exc}")
             st.markdown("**Job description**")
             # The warning sits above the box (reading order is top-down), so it
             # checks the box's live value from session state, not the stale row.
             jd_current = st.session_state.get(f"jd_{r['id']}", r.get("jd_text") or "")
             if tracker_draft.looks_like_snippet(jd_current):
                 st.warning(
-                    "This looks like a search-result snippet, not the full advert. "
-                    "Paste the full advert below for a proper draft and an honest "
-                    "coverage score."
+                    "This is the search result's snippet, not the full advert. If it "
+                    "ends with three dots, that really is where the job board's "
+                    "preview stops: nothing is hidden here. Use Fetch advert text "
+                    "above, or paste the full advert into the box, for a proper "
+                    "draft and an honest coverage score."
                 )
             jd = st.text_area(
                 "Job description", value=r.get("jd_text") or "", height=140,
