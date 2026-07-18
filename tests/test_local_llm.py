@@ -58,6 +58,25 @@ def test_stats_are_per_instance():
     assert b.stats["json_calls"] == 0    # no shared mutable default
 
 
+def test_http_error_surfaces_the_endpoint_body(monkeypatch):
+    """A 400 means the endpoint answered: show its reason, never say 'unreachable'."""
+    import io
+    import urllib.error
+
+    def fake_urlopen(req, timeout=0):
+        raise urllib.error.HTTPError(
+            "http://x", 400, "Bad Request", None,
+            io.BytesIO(b'{"error":"insufficient system resources"}'),
+        )
+
+    monkeypatch.setattr(local_llm.urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(local_llm.LocalLLMError) as err:
+        LocalLLM().complete_text("s", "u")
+    msg = str(err.value)
+    assert "HTTP 400" in msg and "insufficient system resources" in msg
+    assert "unreachable" not in msg
+
+
 def test_list_models_empty_on_dead_endpoint():
     assert LocalLLM(base_url="http://127.0.0.1:9").list_models(connect_timeout=0.3) == []
 
