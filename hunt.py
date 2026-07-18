@@ -23,6 +23,23 @@ CLEARANCE_TERMS = (
     "security clearance", "must hold sc", "nppv", "national security vetting",
 )
 
+# The job-board APIs cannot filter on remote/hybrid working: it lives in the advert
+# text. The sweep detects these signals and stamps them into the fit notes so the
+# workstyle is visible on the board without opening every advert.
+WORKSTYLE_RE = re.compile(
+    r"\b(remote|hybrid|work from home|wfh|home[- ]?based)\b", re.IGNORECASE
+)
+
+
+def workstyle_signals(*texts: str) -> list[str]:
+    """Distinct remote/hybrid signals found in the given texts, normalised."""
+    blob = " ".join(t or "" for t in texts)
+    found = {m.lower().replace("-", " ") for m in WORKSTYLE_RE.findall(blob)}
+    if "work from home" in found:
+        found.discard("work from home")
+        found.add("wfh")
+    return sorted(found)
+
 # Relevance filter for Iain's hunt: a board's keyword search (Adzuna especially) is
 # loose and returns tangential roles, so keep only those whose TITLE mentions one of
 # these delivery/leadership terms. Short/acronym terms match whole words (so "AI"
@@ -120,16 +137,26 @@ def _title_relevant(title: str, terms) -> bool:
 
 
 def saved_to_searches(saved: dict) -> list[dict]:
-    """Turn a saved-search row into the search dicts ``sweep`` expects."""
+    """Turn a saved-search row into the search dicts ``sweep`` expects.
+
+    Both keywords and locations are one-per-line: the sweep runs every keyword in
+    every location (e.g. the London hybrid market plus the area round home), and
+    its de-duplication collapses any role that appears in more than one.
+    """
     keywords = [k.strip() for k in (saved.get("keywords") or "").splitlines() if k.strip()]
+    locations = [
+        loc.strip() for loc in (saved.get("location") or "").splitlines() if loc.strip()
+    ] or [None]
     common = {
-        "location": saved.get("location") or None,
         "distance": int(saved.get("distance") or 10),
         "minimum_salary": int(saved.get("min_salary") or 0) or None,
         "contract": True if saved.get("role_type") == "Contract" else None,
         "permanent": True if saved.get("role_type") == "Permanent" else None,
     }
-    return [{"keywords": kw, **common} for kw in keywords]
+    return [
+        {"keywords": kw, "location": loc, **common}
+        for kw in keywords for loc in locations
+    ]
 
 
 def sweep(
@@ -188,6 +215,8 @@ def sweep(
                 skipped_clearance += 1
                 continue
 
+            signals = workstyle_signals(role.title, jd)
+            style = f" | {'/'.join(signals)}" if signals else ""
             rid = tracker_db.add_role(
                 conn,
                 title=role.title,
@@ -198,7 +227,7 @@ def sweep(
                 link=role.link or None,
                 jd_text=jd or None,
                 source_job_id=role.job_id or None,
-                fit_notes=f"{source_name} sweep: {s.get('keywords', '')}".strip(),
+                fit_notes=f"{source_name} sweep: {s.get('keywords', '')}{style}".strip(),
                 status="Found",
             )
             added.append({"id": rid, "title": role.title, "company": role.company})
@@ -226,8 +255,10 @@ def _main(argv: list[str] | None = None) -> int:
                     help="archive fuzzy duplicate re-posts already on the board, then exit")
     ap.add_argument("--keywords", action="append",
                     help="search term; repeat for several (e.g. --keywords a --keywords b)")
-    ap.add_argument("--location", default=None)
-    ap.add_argument("--distance", type=int, default=10, help="miles from --location")
+    ap.add_argument("--location", action="append", default=None,
+                    help="search area; repeat for several (e.g. --location London "
+                         "--location 'PO17 5LG')")
+    ap.add_argument("--distance", type=int, default=10, help="miles from each --location")
     ap.add_argument("--min-salary", type=int, default=None)
     ap.add_argument("--contract", action="store_true", help="contract roles only")
     ap.add_argument("--permanent", action="store_true", help="permanent roles only")
@@ -265,7 +296,8 @@ def _main(argv: list[str] | None = None) -> int:
             ap.error("--save needs --keywords")
         tracker_db.save_search(
             conn, args.save, keywords="\n".join(args.keywords), source=args.source.title(),
-            location=args.location, distance=args.distance,
+            location="\n".join(args.location) if args.location else None,
+            distance=args.distance,
             min_salary=args.min_salary, role_type=role_type,
         )
         print(f"saved search '{args.save}' (run it with --saved '{args.save}')")
@@ -284,13 +316,16 @@ def _main(argv: list[str] | None = None) -> int:
             ap.error("--keywords is required (or use --saved / --list-saved / --dedupe-board)")
         source = importlib.import_module(args.source)  # reed or adzuna
         common = {
-            "location": args.location,
             "distance": args.distance,
             "minimum_salary": args.min_salary,
             "contract": args.contract or None,
             "permanent": args.permanent or None,
         }
-        searches = [{"keywords": kw, **common} for kw in args.keywords]
+        locations = args.location or [None]
+        searches = [
+            {"keywords": kw, "location": loc, **common}
+            for kw in args.keywords for loc in locations
+        ]
         saved_id = None
     title_terms = None if args.all_titles else RELEVANT_TITLE_TERMS
     try:

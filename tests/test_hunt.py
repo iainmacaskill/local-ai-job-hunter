@@ -161,6 +161,23 @@ def test_dedupe_board_archives_newer_copies_keeps_oldest(tmp_path):
     assert {r["id"] for r in tracker_db.list_archived(conn)} == {second, third}
 
 
+def test_workstyle_signals_detect_and_normalise():
+    got = hunt.workstyle_signals(
+        "Hybrid Programme Manager", "Mostly Work From Home; some remote, home-based OK."
+    )
+    assert got == ["home based", "hybrid", "remote", "wfh"]
+    assert hunt.workstyle_signals("On-site role in the office") == []
+
+
+def test_sweep_stamps_workstyle_into_fit_notes(tmp_path, monkeypatch):
+    conn = _db(tmp_path)
+    _patch_reed(monkeypatch, [_role("111")],
+                jd="Hybrid working: two days a week in the London office, rest remote.")
+    summary = hunt.sweep(conn, [{"keywords": "programme manager"}])
+    r = tracker_db.get_role(conn, summary["added"][0]["id"])
+    assert r["fit_notes"].endswith("| hybrid/remote")
+
+
 def test_init_db_migrates_source_job_id_onto_old_table(tmp_path):
     # An older tracker.db created before source_job_id existed.
     conn = tracker_db.connect(tmp_path / "old.db")

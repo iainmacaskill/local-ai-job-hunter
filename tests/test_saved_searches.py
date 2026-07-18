@@ -67,6 +67,17 @@ def test_saved_to_searches_maps_fields_and_type_flags():
     assert all(s["contract"] is True and s["permanent"] is None for s in searches)
 
 
+def test_saved_to_searches_runs_every_keyword_in_every_location():
+    saved = {"keywords": "ai delivery manager\nprogramme manager",
+             "location": "London\nPO17 5LG", "distance": 20}
+    searches = hunt.saved_to_searches(saved)
+    combos = {(s["keywords"], s["location"]) for s in searches}
+    assert combos == {
+        ("ai delivery manager", "London"), ("ai delivery manager", "PO17 5LG"),
+        ("programme manager", "London"), ("programme manager", "PO17 5LG"),
+    }
+
+
 def test_saved_to_searches_defaults_when_fields_missing():
     searches = hunt.saved_to_searches({"keywords": "pm"})
     assert searches == [{
