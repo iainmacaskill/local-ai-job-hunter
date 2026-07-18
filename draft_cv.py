@@ -193,6 +193,7 @@ def draft_screening_cv(
     out_dir: Path | None = None,
     render_pdf: bool = True,
     guidance: str | None = None,
+    company: str | None = None,
 ) -> dict:
     """Draft + render a screening CV (.docx, and a designed .pdf by default).
 
@@ -208,7 +209,7 @@ def draft_screening_cv(
     jd_keywords = extract_keywords(jd_text, llm)
     payload = build_payload(jd_text, profile, role_title, llm, jd_keywords, guidance)
     report = honesty.verify(payload, profile)  # S3: verify before we render
-    role = {"title": role_title or payload["target_title"]}
+    role = {"title": role_title or payload["target_title"], "company": company}
     docx = cv_render.generate_screening_cv(role, payload, profile, out_dir=out_dir)
     pdf, pdf_error = _render_pdf(payload, role, profile, out_dir) if render_pdf else (None, None)
     coverage = cv_render.keyword_coverage(
