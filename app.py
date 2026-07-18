@@ -33,11 +33,11 @@ st.set_page_config(page_title="CV Drafter — Tracker", page_icon="📋", layout
 # Columns shown in the grid, in order. The rest (jd_text, cv_file, timestamps) are
 # kept but not shown here. `date_found` and `coverage` are read-only (managed).
 GRID_COLUMNS = [
-    "id", "date_found", "title", "company", "type", "rate", "location",
+    "id", "date_found", "title", "open", "company", "type", "rate", "location",
     "status", "fit_score", "fit_reason", "coverage", "date_applied",
     "contact_email", "outcome", "link", "fit_notes",
 ]
-READONLY_COLUMNS = ["id", "date_found", "coverage", "fit_score", "fit_reason"]
+READONLY_COLUMNS = ["id", "date_found", "open", "coverage", "fit_score", "fit_reason"]
 TYPE_OPTIONS = ["", "Contract", "Permanent"]
 
 
@@ -143,7 +143,7 @@ def _find_roles(conn) -> None:
         location = c1.text_input("Location", value="London", key="find_location")
         distance = c2.number_input("Distance (miles)", min_value=0, value=20, key="find_distance")
         min_salary = c3.number_input(
-            "Min salary", min_value=0, value=0, step=1000, key="find_salary"
+            "Min salary", min_value=0, value=90000, step=1000, key="find_salary"
         )
         role_type = st.radio(
             "Type", ["Any", "Contract", "Permanent"], horizontal=True, key="find_type"
@@ -362,6 +362,8 @@ def _draft_queue(conn, roles) -> None:
     for r in queued:
         label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
         with st.expander(label, expanded=True):
+            if r.get("link"):
+                st.markdown(f"Link - [{r['link']}]({r['link']})")
             jd = st.text_area(
                 "Job description", value=r.get("jd_text") or "", height=140, key=f"jd_{r['id']}"
             )
@@ -470,10 +472,27 @@ else:
             )
             st.rerun()
 
-    selected = st.multiselect(
+    f1, f2 = st.columns([4, 1])
+    selected = f1.multiselect(
         "Filter by status", tracker_db.STATUSES, default=tracker_db.STATUSES
     )
-    view = [r for r in roles if (r["status"] or "") in selected]
+    passed = [r for r in roles if (r["status"] or "") == "Pass"]
+    if passed and f2.button(f"🧹 Remove {len(passed)} Pass", help="Archive every role "
+                            "marked Pass to clear the list (reversible below)"):
+        tracker_db.archive_roles(conn, [r["id"] for r in passed])
+        st.toast(f"Archived {len(passed)} passed role(s)")
+        st.rerun()
+
+    # Roles sitting in the To-draft queue below are hidden here to keep the list
+    # clean; they return to the grid once drafted, ready to be marked Applied.
+    queued_ids = {
+        r["id"] for r in roles
+        if (r["status"] or "") in tracker_draft.CV_QUEUE_STATUSES and not r.get("cv_file")
+    }
+    view = [
+        r for r in roles
+        if (r["status"] or "") in selected and r["id"] not in queued_ids
+    ]
     # Ranked triage: scored roles first, best fit at the top; unscored keep
     # their newest-first order below (the sort is stable).
     view.sort(
@@ -484,11 +503,12 @@ else:
     st.session_state["grid_ids"] = [r["id"] for r in view]
 
     st.caption(
-        f"Showing {len(view)} of {len(roles)} role(s), best fit first once scored. "
-        f"Edit any cell; changes save automatically. Tick rows and press Delete to "
-        f"archive them (reversible below)."
+        f"Showing {len(view)} of {len(roles)} role(s), best fit first once scored; "
+        f"roles in the To-draft queue appear below instead. Edit any cell; changes "
+        f"save automatically. Tick rows and press Delete to archive them."
     )
     df = pd.DataFrame(view, columns=list(GRID_COLUMNS))
+    df["open"] = df["link"]  # compact clickable link beside the title
     st.data_editor(
         df,
         key="roles_editor",
@@ -500,6 +520,7 @@ else:
         column_config={
             "id": st.column_config.NumberColumn("ID", width="small"),
             "date_found": st.column_config.TextColumn("Found", width="small"),
+            "open": st.column_config.LinkColumn("🔗", display_text="open", width="small"),
             "status": st.column_config.SelectboxColumn("Status", options=tracker_db.STATUSES),
             "type": st.column_config.SelectboxColumn("Type", options=TYPE_OPTIONS),
             "fit_score": st.column_config.NumberColumn("Fit %", width="small"),
