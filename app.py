@@ -113,7 +113,8 @@ def _saved_searches(conn) -> None:
         terms = ", ".join((s["keywords"] or "").splitlines())
         last = f"last run {s['last_run_at'][:10]}" if s["last_run_at"] else "never run"
         c1.write(f"**{s['name']}**")
-        c1.caption(f"{s['source']}: {terms} | {s['location'] or 'anywhere'} | {last}")
+        places = ", ".join((s["location"] or "").splitlines()) or "anywhere"
+        c1.caption(f"{s['source']}: {terms} | {places} | {last}")
         if c2.button("Run", key=f"run_search_{s['id']}", type="primary"):
             _run_sweep(conn, s["source"], hunt.saved_to_searches(s))
             tracker_db.mark_search_run(conn, s["id"])
@@ -140,7 +141,11 @@ def _find_roles(conn) -> None:
             height=90, key="find_terms",
         )
         c1, c2, c3 = st.columns(3)
-        location = c1.text_input("Location", value="London", key="find_location")
+        locations_text = c1.text_area(
+            "Locations (one per line)", value="London", height=68, key="find_location",
+            help="Each search runs in every location, so you can cover the hybrid "
+                 "London market and the area round home in one sweep. Postcodes work.",
+        )
         distance = c2.number_input("Distance (miles)", min_value=0, value=20, key="find_distance")
         min_salary = c3.number_input(
             "Min salary", min_value=0, value=90000, step=1000, key="find_salary"
@@ -150,19 +155,24 @@ def _find_roles(conn) -> None:
         )
 
         keywords = [t.strip() for t in terms.splitlines() if t.strip()]
+        locations = [
+            loc.strip() for loc in locations_text.splitlines() if loc.strip()
+        ] or [None]
         b1, b2, b3 = st.columns([1, 2, 1])
         if b1.button("Find roles", type="primary", disabled=not ready, key="find_go"):
             if not keywords:
                 st.error("Add at least one search term.")
                 st.stop()
             common = {
-                "location": location.strip() or None,
                 "distance": int(distance),
                 "minimum_salary": int(min_salary) or None,
                 "contract": role_type == "Contract" or None,
                 "permanent": role_type == "Permanent" or None,
             }
-            _run_sweep(conn, name, [{"keywords": kw, **common} for kw in keywords])
+            _run_sweep(conn, name, [
+                {"keywords": kw, "location": loc, **common}
+                for kw in keywords for loc in locations
+            ])
 
         save_name = b2.text_input(
             "Save as", key="find_save_name", placeholder="e.g. London AI hunt",
@@ -176,7 +186,8 @@ def _find_roles(conn) -> None:
             else:
                 tracker_db.save_search(
                     conn, save_name, keywords="\n".join(keywords), source=name,
-                    location=location.strip() or None, distance=int(distance),
+                    location="\n".join(loc for loc in locations if loc) or None,
+                    distance=int(distance),
                     min_salary=int(min_salary) or None,
                     role_type=role_type if role_type != "Any" else None,
                 )
