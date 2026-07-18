@@ -1,6 +1,7 @@
 {
   "model": "qwen/qwen3.6-27b",
-  "date": "2026-07-17",
+  "date": "2026-07-18",
+  "cv_dir": "/Users/iainmacaskill/Claude/Projects/cv-drafter-local/outputs/eval-qwen36-27b",
   "rows": [
     {
       "role": "deloitte",
@@ -8,7 +9,7 @@
       "claude": 100,
       "errors": 0,
       "warnings": 0,
-      "secs": 39,
+      "secs": 49,
       "note": "Claude promoted the CLS/IBM cyber story hard"
     },
     {
@@ -26,7 +27,7 @@
       "claude": 94,
       "errors": 0,
       "warnings": 1,
-      "secs": 40,
+      "secs": 39,
       "note": "UX is a genuine gap"
     },
     {
@@ -35,7 +36,7 @@
       "claude": 93,
       "errors": 0,
       "warnings": 1,
-      "secs": 38,
+      "secs": 37,
       "note": "no legal-sector experience"
     },
     {
@@ -44,7 +45,7 @@
       "claude": 100,
       "errors": 0,
       "warnings": 0,
-      "secs": 41,
+      "secs": 64,
       "note": "pharma is a nice-to-have gap"
     }
   ],
