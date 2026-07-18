@@ -9,6 +9,7 @@ local model. Starts empty; nothing leaves your machine. Run with:
 from __future__ import annotations
 
 import base64
+import datetime
 import os
 from pathlib import Path
 
@@ -516,6 +517,16 @@ def _draft_queue(conn, roles) -> None:
                     f"Redrafted: coverage {out['cv']['coverage']['pct']}%, "
                     f"honesty {rep.summary()}"
                 )
+                st.rerun()
+            if st.button("✅ Applied", key=f"applied_{r['id']}",
+                         help="Same as setting Applied in the grid: stamps today as "
+                              "the application date and starts the follow-up clock. "
+                              "The card then moves on from this section."):
+                fields = {"status": "Applied"}
+                if not r.get("date_applied"):
+                    fields["date_applied"] = datetime.date.today().isoformat()
+                tracker_db.update_role(conn, r["id"], **fields)
+                st.toast(f"Marked Applied: {r['title']}")
                 st.rerun()
 
 
