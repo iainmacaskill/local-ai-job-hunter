@@ -54,6 +54,20 @@ class LocalLLM:
         except OSError:
             return False
 
+    def list_models(self, connect_timeout: float = 2.0) -> list[str]:
+        """Model ids the endpoint currently offers (empty list on any failure).
+
+        LM Studio lists every downloaded model here and loads the requested one
+        on demand, so "offered" is the honest word rather than "loaded".
+        """
+        try:
+            req = urllib.request.Request(f"{self.base_url}/models")
+            with urllib.request.urlopen(req, timeout=connect_timeout) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except (OSError, TimeoutError, ValueError):
+            return []
+        return sorted(str(m.get("id")) for m in body.get("data", []) if m.get("id"))
+
     # -- prompt build ------------------------------------------------------ #
     @staticmethod
     def build_prompt(system: str, user: str, prefill: str = "") -> str:

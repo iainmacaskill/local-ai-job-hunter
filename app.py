@@ -48,6 +48,31 @@ def _conn():
     return conn
 
 
+@st.cache_data(ttl=10)
+def _model_status() -> dict:
+    """What model the app will use, and whether the endpoint actually offers it."""
+    llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
+    if not llm.is_up(connect_timeout=0.4):
+        return {"state": "offline", "model": settings.LLM_MODEL, "available": []}
+    available = llm.list_models()
+    state = "ready" if (not available or settings.LLM_MODEL in available) else "mismatch"
+    return {"state": state, "model": settings.LLM_MODEL, "available": available}
+
+
+def _model_badge() -> None:
+    s = _model_status()
+    if s["state"] == "offline":
+        st.caption(f"🔴 **Local model offline.** Start LM Studio's server "
+                   f"({settings.LLM_BASE_URL}). Configured model: `{s['model']}`")
+    elif s["state"] == "mismatch":
+        offered = ", ".join(s["available"][:4]) or "none"
+        st.caption(f"🟡 **Configured model `{s['model']}` is not offered by LM Studio** "
+                   f"(offered: {offered}). Drafting and scoring will fail until it is "
+                   f"loaded, or CVDRAFTER_LLM_MODEL is changed (restart the app after).")
+    else:
+        st.caption(f"🟢 **Model: `{s['model']}`**")
+
+
 def _source_ready(name: str) -> bool:
     if name == "Reed":
         return bool(os.environ.get("REED_API_KEY"))
@@ -409,6 +434,7 @@ def _archive_panel(conn) -> None:
 conn = _conn()
 
 st.title("📋 Roles")
+_model_badge()
 _latest_draft_panel()
 _find_roles(conn)
 _add_role_form(conn)
