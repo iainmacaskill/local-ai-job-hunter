@@ -62,6 +62,40 @@ def test_draft_cv_and_cover_stamps_both(tmp_path):
     assert saved["cover_file"] and saved["cover_file"].endswith(".docx")
 
 
+class SpyLLM(FakeLLM):
+    """FakeLLM that also records every prompt it is sent."""
+
+    def __init__(self):
+        self.prompts = []
+
+    def complete_json(self, system, user, max_tokens=0):
+        self.prompts.append(user)
+        return super().complete_json(system, user, max_tokens)
+
+
+def test_redraft_guidance_reaches_the_prompts_and_restamps(tmp_path):
+    conn, role = _queued_role(tmp_path, "Draft CV")
+    spy = SpyLLM()
+    out = tracker_draft.draft_for_role(
+        conn, role, llm=spy, out_dir=tmp_path, render_pdf=False,
+        guidance="Lead with the NHS AI programme.",
+    )
+    guided = [p for p in spy.prompts if "Lead with the NHS AI programme." in p]
+    assert guided, "guidance never reached a prompt"
+    assert any("USER FEEDBACK" in p and "facts always win" in p for p in guided)
+    saved = tracker_db.get_role(conn, role["id"])
+    assert saved["cv_file"] and isinstance(saved["coverage"], int)
+    assert out["cv"]["honesty"] is not None       # guard still verifies redrafts
+
+
+def test_interview_pdf_path_derives_from_cv_file(tmp_path):
+    role = {"cv_file": "Alex Rivera - Screening - AI Delivery Manager.docx"}
+    p = tracker_draft.interview_pdf_path(role, out_dir=tmp_path)
+    assert p.name == "Alex Rivera - Interview - AI Delivery Manager.pdf"
+    assert p.parent == tmp_path
+    assert tracker_draft.interview_pdf_path({"cv_file": None}) is None
+
+
 def test_queue_statuses_are_valid():
     """The draft-queue triggers must be real statuses, or the tracker would offer a
     status the drafter never acts on."""

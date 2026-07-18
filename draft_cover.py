@@ -54,8 +54,14 @@ def _facts(profile: dict) -> str:
 
 
 def draft_paragraphs(
-    jd_text: str, role_title: str | None, company: str | None, profile: dict, llm
+    jd_text: str, role_title: str | None, company: str | None, profile: dict, llm,
+    guidance: str | None = None,
 ) -> list[str]:
+    guide = (
+        f"USER FEEDBACK on the previous draft, to apply where it does not conflict "
+        f"with the candidate facts (facts always win): {guidance.strip()}\n\n"
+        if (guidance or "").strip() else ""
+    )
     out = llm.complete_json(
         system=(
             "Write the body of a concise cover letter as exactly three short paragraphs, "
@@ -67,6 +73,7 @@ def draft_paragraphs(
         ),
         user=(
             f"JOB ADVERT:\n{jd_text}\n\n"
+            f"{guide}"
             f"ROLE: {role_title or '(use the advert job title)'}\n"
             f"ORGANISATION: {company or '(use the advert; otherwise say your organisation)'}\n\n"
             f"CANDIDATE FACTS:\n{_facts(profile)}"
@@ -135,12 +142,13 @@ def draft_cover_letter(
     profile: dict | None = None,
     llm=None,
     out_dir: Path | None = None,
+    guidance: str | None = None,
 ) -> dict:
     profile = profile or load_profile()
     llm = llm or LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
     out_dir = Path(out_dir) if out_dir else OUTPUT_DIR
 
-    paragraphs = draft_paragraphs(jd_text, role_title, company, profile, llm)
+    paragraphs = draft_paragraphs(jd_text, role_title, company, profile, llm, guidance)
     report = honesty.verify_text("\n".join(paragraphs), profile, what="cover letter")
     docx = render_docx(profile, company, role_title, paragraphs, out_dir)
     txt = render_txt(profile, company, role_title, paragraphs, out_dir)
