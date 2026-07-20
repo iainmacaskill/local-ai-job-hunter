@@ -76,11 +76,42 @@ class LocalLLM:
         except OSError:
             return False
 
+    def list_loaded_models(self, connect_timeout: float = 2.0) -> list[str] | None:
+        """Model ids LM Studio currently has LOADED in memory, or None if unknown.
+
+        The plain OpenAI-compatible /v1/models (list_models below) lists every
+        DOWNLOADED model regardless of load state, which is not enough to tell
+        a loaded model apart from one merely on disk: with two qwen models
+        downloaded and only one loaded, list_models still shows both, and
+        auto-detection can pick the unloaded one, which then fails to JIT-load
+        if the loaded one is already using the available memory. LM Studio's
+        own extended REST API carries a real ``state`` field, so this is used
+        in preference to list_models when available.
+
+        Returns None (not an empty list) when this endpoint does not exist
+        (a non-LM-Studio backend, or an old LM Studio version) so the caller
+        can fall back to list_models rather than reading "nothing loaded"
+        from a backend that simply does not support this endpoint.
+        """
+        parsed = urlparse(self.base_url)
+        root = f"{parsed.scheme}://{parsed.netloc}"
+        try:
+            req = urllib.request.Request(f"{root}/api/v0/models")
+            with urllib.request.urlopen(req, timeout=connect_timeout) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+        except (OSError, TimeoutError, ValueError):
+            return None
+        return sorted(
+            str(m.get("id")) for m in body.get("data", [])
+            if m.get("state") == "loaded" and m.get("type") != "embeddings" and m.get("id")
+        )
+
     def list_models(self, connect_timeout: float = 2.0) -> list[str]:
         """Model ids the endpoint currently offers (empty list on any failure).
 
         LM Studio lists every downloaded model here and loads the requested one
-        on demand, so "offered" is the honest word rather than "loaded".
+        on demand, so "offered" is the honest word rather than "loaded". Prefer
+        list_loaded_models() when you need to know what is actually resident.
         """
         try:
             req = urllib.request.Request(f"{self.base_url}/models")

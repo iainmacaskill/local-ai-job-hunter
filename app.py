@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 import adzuna
 import fetch_jd
@@ -67,7 +68,11 @@ def _model_status() -> dict:
     probe = LocalLLM(base_url=settings.LLM_BASE_URL)
     if not probe.is_up(connect_timeout=0.4):
         return {"state": "offline", "model": None, "available": []}
-    available = probe.list_models()
+    # Prefer models actually LOADED (LM Studio's extended API); this is what
+    # tells a resident model apart from one merely downloaded, which is what
+    # caused auto-detect to pick an unloaded model that then failed to JIT-load.
+    loaded = probe.list_loaded_models()
+    available = loaded if loaded is not None else probe.list_models()
     pinned = os.environ.get("CVDRAFTER_LLM_MODEL")
     model = local_llm.resolve_model(available, preferred=pinned)
     if model is None:
@@ -375,6 +380,27 @@ def _latest_draft_panel() -> None:
         _download(c3, d.get("cover_path"), "⬇ Cover letter (.docx)", key="last_dl_cover")
 
 
+def _autoscroll_to_last_action() -> None:
+    """Scroll back to whichever role card the user last clicked a button on.
+
+    Streamlit resets scroll to the top of the page on every rerun (any button
+    click anywhere triggers a rerun), which on a long list of role cards looks
+    exactly like "the section I was working in closed". Each card has an
+    anchor div; this restores position to it via JS in the components iframe,
+    which can reach the parent page since it is served same-origin.
+    """
+    target = st.session_state.pop("scroll_to_role", None)
+    if target is None:
+        return
+    components.html(
+        f"""<script>
+        const el = window.parent.document.getElementById('role-anchor-{target}');
+        if (el) {{ el.scrollIntoView({{block: 'start'}}); }}
+        </script>""",
+        height=0,
+    )
+
+
 def _draft_queue(conn, roles) -> None:
     """One card per pursued role, kept whole through the application act.
 
@@ -427,7 +453,11 @@ def _draft_queue(conn, roles) -> None:
         label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
         if has_draft:
             label = f"📄 {label} (drafted, coverage {r.get('coverage')}%)"
-        with st.expander(label, expanded=not has_draft):
+        st.markdown(f'<div id="role-anchor-{r["id"]}"></div>', unsafe_allow_html=True)
+        # A stable key (not the label, which changes with coverage % after a
+        # redraft) so the user's open/closed state survives a rerun instead
+        # of resetting to collapsed every time the label text changes.
+        with st.expander(label, expanded=not has_draft, key=f"exp_{r['id']}"):
             # --- reference material: always present ------------------------ #
             if r.get("link"):
                 st.markdown(f"Link - [{r['link']}]({r['link']})")
@@ -435,6 +465,7 @@ def _draft_queue(conn, roles) -> None:
                              help="Fetches the page at the link and drops its "
                                   "readable text into the box below for you to "
                                   "clean up. Some pages cannot be read this way."):
+                    st.session_state["scroll_to_role"] = r["id"]
                     try:
                         st.session_state[f"jd_{r['id']}"] = fetch_jd.fetch_advert_text(
                             r["link"]
@@ -483,6 +514,7 @@ def _draft_queue(conn, roles) -> None:
                     st.toast(f"Archived: {r['title']}")
                     st.rerun()
                 if draft_clicked:
+                    st.session_state["scroll_to_role"] = r["id"]
                     if not jd.strip():
                         st.error("Paste the job description first.")
                         st.stop()
@@ -547,6 +579,7 @@ def _draft_queue(conn, roles) -> None:
                      "against an updated job description alone.",
             )
             if st.button("🔁 Redraft", key=f"redraft_{r['id']}", disabled=not up):
+                st.session_state["scroll_to_role"] = r["id"]
                 if jd.strip():
                     tracker_db.update_role(conn, r["id"], jd_text=jd.strip())
                 role = dict(r)
@@ -569,6 +602,7 @@ def _draft_queue(conn, roles) -> None:
                          help="Same as setting Applied in the grid: stamps today as "
                               "the application date and starts the follow-up clock. "
                               "The card then moves on from this section."):
+                st.session_state["scroll_to_role"] = r["id"]
                 fields = {"status": "Applied"}
                 if not r.get("date_applied"):
                     fields["date_applied"] = datetime.date.today().isoformat()
@@ -582,6 +616,8 @@ def _draft_queue(conn, roles) -> None:
                     tracker_db.archive_roles(conn, [r["id"]])
                     st.toast(f"Archived: {r['title']}")
                     st.rerun()
+
+    _autoscroll_to_last_action()
 
 
 def _archive_panel(conn) -> None:
