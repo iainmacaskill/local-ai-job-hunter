@@ -55,7 +55,7 @@ def cv_fulltext(screening: dict, profile: dict) -> str:
     parts = [screening.get("target_title", ""), screening.get("summary", "")]
     parts += list(screening.get("core_skills", []))
     for job in screening.get("experience") or profile.get("jobs", []):
-        parts += [job.get("title", ""), job.get("company", "")]
+        parts += [job.get("title", ""), job.get("company", ""), job.get("intro", "")]
         parts += list(job.get("bullets", []))
     parts += [profile.get("certifications", ""), profile.get("education", "")]
     return "\n".join(str(p) for p in parts)
@@ -126,6 +126,8 @@ def generate_screening_cv(role: dict, screening: dict, profile: dict, out_dir=No
         _run(doc.add_paragraph(), f"{job.get('title', '')}, {job.get('company', '')}", bold=True)
         if job.get("dates"):
             _run(doc.add_paragraph(), job["dates"], size=10)
+        if job.get("intro"):
+            _run(doc.add_paragraph(), job["intro"])
         for bullet in job.get("bullets", []):
             _run(doc.add_paragraph(style="List Bullet"), bullet)
 

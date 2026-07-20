@@ -1,3 +1,4 @@
 python-docx
 streamlit
 pandas
+pypdf

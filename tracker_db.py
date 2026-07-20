@@ -55,6 +55,7 @@ CREATE TABLE IF NOT EXISTS roles (
     fit_score    INTEGER,                      -- triage: 0-100 fit vs the profile
     fit_reason   TEXT,                         -- triage: one-line why / why not
     archived     INTEGER NOT NULL DEFAULT 0,   -- 1 = hidden from the board (reversible)
+    archived_at  TEXT,                         -- date last archived; cleared on restore
     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -104,7 +105,7 @@ def _ensure_columns(conn: sqlite3.Connection) -> None:
     new_columns = [
         ("source_job_id", "TEXT"),
         ("contact_email", "TEXT"), ("contact_source", "TEXT"), ("followed_up_at", "TEXT"),
-        ("archived", "INTEGER NOT NULL DEFAULT 0"),
+        ("archived", "INTEGER NOT NULL DEFAULT 0"), ("archived_at", "TEXT"),
         ("fit_score", "INTEGER"), ("fit_reason", "TEXT"),
     ]
     for col, ddl in new_columns:
@@ -167,8 +168,10 @@ def _set_archived(conn: sqlite3.Connection, role_ids, value: int) -> int:
     if not ids:
         return 0
     marks = ", ".join("?" for _ in ids)
+    stamp = "date('now')" if value else "NULL"
     cur = conn.execute(
-        f"UPDATE roles SET archived = ?, updated_at = datetime('now') WHERE id IN ({marks})",
+        f"UPDATE roles SET archived = ?, archived_at = {stamp}, "
+        f"updated_at = datetime('now') WHERE id IN ({marks})",
         [value, *ids],
     )
     conn.commit()

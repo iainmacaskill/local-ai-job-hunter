@@ -114,23 +114,39 @@ def write_head(
 def rewrite_bullets(
     jd_text: str, job: dict, llm, keywords: list[str] | None = None,
     guidance: str | None = None,
-) -> list[str]:
-    """Rewrite one role's bullets to mirror the JD, using only that role's facts."""
+) -> dict:
+    """Rewrite one role's bullets to mirror the JD, using only that role's facts.
+
+    Returns {"intro": str, "bullets": list[str]}. ``intro`` is a one-sentence
+    line rendered between the role's title/dates and its bullets; it is only
+    ever generated when ``guidance`` is given (e.g. "add an intro sentence to
+    each role"), so a plain draft's format never changes unasked. When no
+    intro is warranted the model returns an empty string, which the renderers
+    treat as "no intro line" rather than a blank paragraph.
+    """
     existing = [b for b in job.get("bullets", []) if str(b).strip()]
     if len(existing) < 2:
-        return existing  # one-line roles are passed through, never inflated
+        return {"intro": "", "bullets": existing}  # one-line roles passed through
     kw_line = (
         f"Mirror these advert terms where the bullet genuinely supports them: "
         f"{', '.join(keywords[:12])}.\n"
         if keywords
         else ""
     )
+    intro_instruction = (
+        'Also set "intro" to one short sentence introducing the role (only if the '
+        "user's guidance below asks for this format; leave it as an empty string "
+        "otherwise). "
+        if guidance
+        else 'Set "intro" to an empty string. '
+    )
     out = llm.complete_json(
         system=(
             "Rewrite this single role's bullet points to mirror the job advert's "
             "language, using ONLY facts already present in the given bullets. Do not add "
             "employers, tools, metrics or claims that are not there. "
-            'Return JSON: {"bullets": array of 2 to 3 strings}. ' + STYLE
+            f"{intro_instruction}"
+            'Return JSON: {"intro": string, "bullets": array of 2 to 3 strings}. ' + STYLE
         ),
         user=(
             f"JOB ADVERT (for language to mirror):\n{jd_text[:1200]}\n\n"
@@ -139,10 +155,13 @@ def rewrite_bullets(
             f"ROLE: {job.get('title')} at {job.get('company')} ({job.get('dates')})\n"
             f"EXISTING BULLETS:\n- " + "\n- ".join(existing)
         ),
-        max_tokens=500,
+        max_tokens=550,
     )
     new = [str(b).strip() for b in out.get("bullets", []) if str(b).strip()]
-    return new or existing  # never drop a role's content on a bad response
+    return {
+        "intro": str(out.get("intro") or "").strip(),
+        "bullets": new or existing,  # never drop a role's content on a bad response
+    }
 
 
 def build_payload(
@@ -155,7 +174,7 @@ def build_payload(
             "title": job.get("title"),
             "company": job.get("company"),
             "dates": job.get("dates"),
-            "bullets": rewrite_bullets(jd_text, job, llm, keywords, guidance),
+            **rewrite_bullets(jd_text, job, llm, keywords, guidance),
         }
         for job in profile.get("jobs", [])
     ]

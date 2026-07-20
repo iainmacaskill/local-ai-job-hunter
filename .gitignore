@@ -19,3 +19,4 @@ evals/results/triage-*
 
 # Machine-local Streamlit config (network binding stays out of the public repo)
 .streamlit/
+source_docs/

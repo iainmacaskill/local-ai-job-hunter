@@ -27,6 +27,32 @@ DEFAULT_BASE_URL = "http://localhost:1234/v1"
 DEFAULT_MODEL = "qwen/qwen3.6-27b"
 STOP = "<|im_end|>"
 
+# Preference order when more than one usable model is offered. Substring match
+# against the id (case-insensitive), so "qwen/qwen3.6-27b" etc. all match.
+RECOMMENDED_MODELS = ("qwen3.6-27b", "qwen3.5-9b")
+
+
+def resolve_model(available: list[str], preferred: str | None = None) -> str | None:
+    """Pick which model id to use from what the endpoint currently offers.
+
+    Supports the "load one model in LM Studio, the app just uses it" workflow:
+    with exactly one non-embedding model offered, that one is used regardless
+    of name. An explicit ``preferred`` id (e.g. a pinned CVDRAFTER_LLM_MODEL)
+    wins if it is still offered. With several models offered and no pin, the
+    recommended qwen models are preferred in order. Returns None when nothing
+    usable is offered (endpoint down, or only embedding models loaded).
+    """
+    if preferred and preferred in available:
+        return preferred
+    usable = [m for m in available if "embed" not in m.lower()]
+    if len(usable) == 1:
+        return usable[0]
+    for rec in RECOMMENDED_MODELS:
+        for m in usable:
+            if rec in m.lower():
+                return m
+    return usable[0] if usable else None
+
 
 class LocalLLMError(RuntimeError):
     """Raised when the endpoint is unreachable or returns unusable output."""

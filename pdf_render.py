@@ -67,6 +67,7 @@ def render_html(role: dict, profile: dict, screening: dict) -> str:
     jobs_html = []
     for job in jobs:
         bullets = "".join(f"<li>{_e(b)}</li>" for b in job.get("bullets", []))
+        intro = f'<p class="intro">{_e(job["intro"])}</p>' if job.get("intro") else ""
         jobs_html.append(f"""
         <div class="job">
           <div class="jobhead">
@@ -74,6 +75,7 @@ def render_html(role: dict, profile: dict, screening: dict) -> str:
               <span class="co">{_e(job.get('company'))}</span></div>
             <div class="dates">{_e(job.get('dates'))}</div>
           </div>
+          {intro}
           <ul>{bullets}</ul>
         </div>""")
     jobs_block = "".join(jobs_html)
@@ -108,6 +110,7 @@ def render_html(role: dict, profile: dict, screening: dict) -> str:
   .at {{ color:{LIGHT}; font-weight:400; }}
   .co {{ color:{TEAL}; font-weight:600; font-style:italic; }}
   .dates {{ font-size:9.2px; color:{LIGHT}; white-space:nowrap; }}
+  .intro {{ margin:3px 0 0; color:{MID}; font-style:italic; }}
   ul {{ margin:4px 0 0; padding-left:15px; }}
   li {{ margin:1.5px 0; color:{MID}; }}
   ul.ach li {{ color:{INK}; }}

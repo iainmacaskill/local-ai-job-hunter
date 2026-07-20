@@ -20,12 +20,15 @@ import adzuna
 import fetch_jd
 import followup
 import hunt
+import local_llm
+import profile_builder
 import reed
 import settings
+import source_docs
 import tracker_db
 import tracker_draft
 import triage
-from cv_profile import OUTPUT_DIR, load_profile
+from cv_profile import OUTPUT_DIR, load_profile, load_profile_or_empty, save_profile
 from local_llm import LocalLLM
 
 # Adzuna first: its keys are issued instantly, so it is the default source.
@@ -53,25 +56,38 @@ def _conn():
 
 @st.cache_data(ttl=10)
 def _model_status() -> dict:
-    """What model the app will use, and whether the endpoint actually offers it."""
-    llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
-    if not llm.is_up(connect_timeout=0.4):
-        return {"state": "offline", "model": settings.LLM_MODEL, "available": []}
-    available = llm.list_models()
-    state = "ready" if (not available or settings.LLM_MODEL in available) else "mismatch"
-    return {"state": state, "model": settings.LLM_MODEL, "available": available}
+    """Which model the app will use, auto-detected from what LM Studio offers.
+
+    Re-resolved every 10s, so loading a different model in LM Studio (e.g.
+    switching between the recommended qwen3.5-9b and qwen3.6-27b) is picked up
+    on the next page load/refresh without editing .env or restarting the app.
+    CVDRAFTER_LLM_MODEL, if set, pins a specific model and wins when it is
+    still offered.
+    """
+    probe = LocalLLM(base_url=settings.LLM_BASE_URL)
+    if not probe.is_up(connect_timeout=0.4):
+        return {"state": "offline", "model": None, "available": []}
+    available = probe.list_models()
+    pinned = os.environ.get("CVDRAFTER_LLM_MODEL")
+    model = local_llm.resolve_model(available, preferred=pinned)
+    if model is None:
+        return {"state": "none", "model": None, "available": available}
+    return {"state": "ready", "model": model, "available": available}
+
+
+def _resolved_model() -> str:
+    """Model id to use for a drafting/scoring call right now."""
+    return _model_status()["model"] or settings.LLM_MODEL
 
 
 def _model_badge() -> None:
     s = _model_status()
     if s["state"] == "offline":
         st.caption(f"🔴 **Local model offline.** Start LM Studio's server "
-                   f"({settings.LLM_BASE_URL}). Configured model: `{s['model']}`")
-    elif s["state"] == "mismatch":
-        offered = ", ".join(s["available"][:4]) or "none"
-        st.caption(f"🟡 **Configured model `{s['model']}` is not offered by LM Studio** "
-                   f"(offered: {offered}). Drafting and scoring will fail until it is "
-                   f"loaded, or CVDRAFTER_LLM_MODEL is changed (restart the app after).")
+                   f"({settings.LLM_BASE_URL}) with a model loaded.")
+    elif s["state"] == "none":
+        st.caption("🟡 **LM Studio is up but no usable model is loaded.** Load "
+                   "qwen3.5-9b or qwen3.6-27b in LM Studio.")
     else:
         st.caption(f"🟢 **Model: `{s['model']}`**")
 
@@ -130,9 +146,9 @@ def _saved_searches(conn) -> None:
 def _find_roles(conn) -> None:
     """Search a free job board and log new roles to the tracker (C3)."""
     settings.load_env()  # pick up a .env created after the app started
-    with st.expander("🔎 Find roles (Adzuna / Reed)"):
+    with st.expander("🔎 Find roles (Adzuna)"):
         _saved_searches(conn)
-        name = st.radio("Source", list(SOURCES), horizontal=True, key="find_source")
+        name = st.radio("Source", ["Adzuna"], horizontal=True, key="find_source")
         ready = _source_ready(name)
         if not ready:
             need = "REED_API_KEY" if name == "Reed" else "ADZUNA_APP_ID and ADZUNA_APP_KEY"
@@ -200,7 +216,7 @@ def _find_roles(conn) -> None:
 
 def _add_role_form(conn) -> None:
     empty = not tracker_db.list_roles(conn)
-    with st.expander("➕ Add a role", expanded=empty):
+    with st.expander("➕ Add a role manually", expanded=empty):
         with st.form("add_role", clear_on_submit=True):
             title = st.text_input("Title *")
             c1, c2, c3 = st.columns(3)
@@ -297,7 +313,7 @@ def _followups_due(conn, due: list[dict]) -> None:
                     profile = load_profile()
                 except FileNotFoundError:
                     profile = {}
-                llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
+                llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=_resolved_model())
                 if profile and llm.is_up():
                     with st.spinner("Drafting locally..."):
                         st.session_state[f"fu_text_{r['id']}"] = followup.draft_followup(
@@ -379,7 +395,25 @@ def _draft_queue(conn, roles) -> None:
         "advert, refine and download here; mark the role Applied in the grid once "
         "you have submitted it."
     )
-    llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
+    # Light-blue styling for "Add to Archive" buttons, scoped via the wrapping
+    # container's key -> class (st-key-archive_wrap_<id>), so Draft now (primary
+    # red) is untouched.
+    st.markdown(
+        """<style>
+        div[class*="st-key-archive_wrap_"] button {
+            background-color: #cfe8fb;
+            color: #06304f;
+            border: 1px solid #9cc9ec;
+        }
+        div[class*="st-key-archive_wrap_"] button:hover {
+            background-color: #b9dcf6;
+            color: #06304f;
+            border-color: #7fb8e8;
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
+    llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=_resolved_model())
     up = llm.is_up()
     if not up:
         st.warning(
@@ -434,8 +468,21 @@ def _draft_queue(conn, roles) -> None:
                     help="Switch before drafting if the application unexpectedly "
                          "asks for a cover letter (or does not need one).",
                 )
-                if st.button("Draft now", key=f"draft_{r['id']}", disabled=not up,
-                             type="primary"):
+                dc1, dc2, _dc_spacer = st.columns([1, 1, 4])
+                draft_clicked = dc1.button("Draft now", key=f"draft_{r['id']}",
+                                           disabled=not up, type="primary")
+                with dc2:
+                    with st.container(key=f"archive_wrap_{r['id']}"):
+                        archive_clicked = st.button(
+                            "Add to Archive", key=f"archive_{r['id']}",
+                            help="Not applying — archive it (reversible in the "
+                                 "Archive panel).",
+                        )
+                if archive_clicked:
+                    tracker_db.archive_roles(conn, [r["id"]])
+                    st.toast(f"Archived: {r['title']}")
+                    st.rerun()
+                if draft_clicked:
                     if not jd.strip():
                         st.error("Paste the job description first.")
                         st.stop()
@@ -528,6 +575,13 @@ def _draft_queue(conn, roles) -> None:
                 tracker_db.update_role(conn, r["id"], **fields)
                 st.toast(f"Marked Applied: {r['title']}")
                 st.rerun()
+            with st.container(key=f"archive_wrap_post_{r['id']}"):
+                if st.button("Add to Archive", key=f"archive_post_{r['id']}",
+                             help="Decided not to pursue this one after drafting — "
+                                  "archive it (reversible in the Archive panel)."):
+                    tracker_db.archive_roles(conn, [r["id"]])
+                    st.toast(f"Archived: {r['title']}")
+                    st.rerun()
 
 
 def _archive_panel(conn) -> None:
@@ -540,11 +594,17 @@ def _archive_panel(conn) -> None:
             "Archived roles are off the board but still known to the sweep, so they "
             "will not be re-added by a search. Restore any, or delete them for good."
         )
+        hc1, hc2, hc3, hc4 = st.columns([4, 1.4, 1, 1])
+        hc1.caption("Role")
+        hc2.caption("Archived date")
+        hc3.caption("Applied for")
         for r in archived:
-            c1, c2 = st.columns([5, 1])
+            c1, c2, c3, c4 = st.columns([4, 1.4, 1, 1])
             label = f"{r['title']}, {r['company']}" if r.get("company") else r["title"]
             c1.write(f"{label} ({r.get('status')})")
-            if c2.button("Restore", key=f"restore_{r['id']}"):
+            c2.write(r.get("archived_at") or "—")
+            c3.write("✅" if r.get("date_applied") else "❌")
+            if c4.button("Restore", key=f"restore_{r['id']}"):
                 tracker_db.restore_roles(conn, [r["id"]])
                 st.rerun()
         st.divider()
@@ -560,130 +620,336 @@ def _archive_panel(conn) -> None:
 
 conn = _conn()
 
-st.title("📋 Roles")
-_model_badge()
-_latest_draft_panel()
-_find_roles(conn)
-_add_role_form(conn)
+# Make the two tabs read as clearly separate pages: bigger/bolder labels, a
+# thick coloured underline + coloured label on the active one, gap between
+# tabs. No hardcoded backgrounds, so it holds up in both light and dark theme.
+st.markdown(
+    """<style>
+    div[data-testid="stTabs"] button[data-baseweb="tab"] {
+        gap: 0.5rem;
+        margin-right: 12px;
+        padding: 0.85rem 0.25rem;
+    }
+    div[data-testid="stTabs"] button[data-baseweb="tab"] p {
+        font-size: 1.15rem;
+        font-weight: 700;
+    }
+    div[data-testid="stTabs"] button[aria-selected="true"] p {
+        color: #ff4b4b;
+    }
+    div[data-testid="stTabs"] [data-baseweb="tab-highlight"] {
+        background-color: #ff4b4b;
+        height: 4px;
+        border-radius: 2px;
+    }
+    div[data-testid="stTabs"] [data-baseweb="tab-border"] {
+        display: none;
+    }
+    </style>""",
+    unsafe_allow_html=True,
+)
+tab_search, tab_applied, tab_source = st.tabs(
+    ["📋 Search & Apply", "✅ Applied for Roles", "📚 Source CV"]
+)
 
-followup.scan_contacts(conn)  # stamp advert-published emails onto contact-less roles
-roles = tracker_db.list_roles(conn)
-due = followup.list_due(conn)
+with tab_search:
+    _model_badge()
+    _latest_draft_panel()
+    _find_roles(conn)
+    _add_role_form(conn)
 
-if not roles:
-    st.info(
-        "No roles yet. Add one above. This is your fresh, local tracker. Nothing here "
-        "leaves your machine."
-    )
-else:
-    _metrics_row(roles, len(due))
+    followup.scan_contacts(conn)  # stamp advert-published emails onto contact-less roles
+    roles = tracker_db.list_roles(conn)
+    due = followup.list_due(conn)
 
-    unscored = [r for r in roles if r["status"] == "Found" and r.get("fit_score") is None]
-    if unscored:
-        if st.button(f"🎯 Score my fit for {len(unscored)} new role(s)", type="primary"):
-            try:
-                profile = load_profile()
-            except FileNotFoundError:
-                st.error("profile.json is needed to score fit (copy profile.example.json).")
-                st.stop()
-            llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=settings.LLM_MODEL)
-            scorer = llm if llm.is_up() else None
-            if scorer is None:
-                st.caption("Local model offline: scoring by keyword overlap only.")
-            bar = st.progress(0.0, text="Scoring...")
-            triage.score_found(
-                conn, profile, scorer,
-                progress=lambda i, n: bar.progress(i / n, text=f"Scoring {i} of {n}..."),
-            )
+    if not roles:
+        st.info(
+            "No roles yet. Add one above. This is your fresh, local tracker. Nothing here "
+            "leaves your machine."
+        )
+    else:
+        _metrics_row(roles, len(due))
+
+        unscored = [r for r in roles if r["status"] == "Found" and r.get("fit_score") is None]
+        if unscored:
+            if st.button(f"🎯 Score my fit for {len(unscored)} new role(s)", type="primary"):
+                try:
+                    profile = load_profile()
+                except FileNotFoundError:
+                    st.error("profile.json is needed to score fit (copy profile.example.json).")
+                    st.stop()
+                llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=_resolved_model())
+                scorer = llm if llm.is_up() else None
+                if scorer is None:
+                    st.caption("Local model offline: scoring by keyword overlap only.")
+                bar = st.progress(0.0, text="Scoring...")
+                triage.score_found(
+                    conn, profile, scorer,
+                    progress=lambda i, n: bar.progress(i / n, text=f"Scoring {i} of {n}..."),
+                )
+                st.rerun()
+
+        f1, f2 = st.columns([3, 1.6])
+        selected = f1.multiselect(
+            "Filter by status", tracker_db.STATUSES, default=tracker_db.STATUSES
+        )
+        workstyle = f2.selectbox(
+            "Home working", ["Any", "Remote friendly", "Mostly home (4+ days a week)"],
+            help="Read from each advert's own text (snippet or fetched JD). Adverts "
+                 "that do not state a split stay under Any only: unstated is not the "
+                 "same as not remote.",
+        )
+
+        # Roles sitting in the To-draft queue below are hidden here to keep the list
+        # clean; they return to the grid once drafted, ready to be marked Applied.
+        queued_ids = {
+            r["id"] for r in roles
+            if (r["status"] or "") in tracker_draft.CV_QUEUE_STATUSES and not r.get("cv_file")
+        }
+        view = [
+            r for r in roles
+            if (r["status"] or "") in selected and r["id"] not in queued_ids
+        ]
+        if workstyle != "Any":
+            def _ws_ok(r):
+                texts = (r.get("title") or "", r.get("jd_text") or "", r.get("fit_notes") or "")
+                days = hunt.home_days(*texts)
+                if workstyle.startswith("Mostly"):
+                    return days is not None and days >= 4
+                return days is not None or bool(hunt.workstyle_signals(*texts))
+            view = [r for r in view if _ws_ok(r)]
+        # Ranked triage: scored roles first, best fit at the top; unscored keep
+        # their newest-first order below (the sort is stable).
+        view.sort(
+            key=lambda r: (r.get("fit_score") is not None, r.get("fit_score") or 0),
+            reverse=True,
+        )
+        # Remember the displayed row ids (in order) so the edit callback maps correctly.
+        st.session_state["grid_ids"] = [r["id"] for r in view]
+
+        st.caption(
+            f"Showing {len(view)} of {len(roles)} role(s), best fit first once scored; "
+            f"roles in the To-draft queue appear below instead. Edit any cell; changes "
+            f"save automatically. Tick rows and press Delete to archive them."
+        )
+        df = pd.DataFrame(view, columns=list(GRID_COLUMNS))
+        df["open"] = df["link"]  # compact clickable link beside the title
+        st.data_editor(
+            df,
+            key="roles_editor",
+            on_change=_persist_grid_edits,
+            width="stretch",
+            hide_index=True,
+            num_rows="dynamic",
+            disabled=READONLY_COLUMNS,
+            column_config={
+                "id": st.column_config.NumberColumn("ID", width="small"),
+                "date_found": st.column_config.TextColumn("Found", width="small"),
+                "open": st.column_config.LinkColumn("🔗", display_text="open", width="small"),
+                "status": st.column_config.SelectboxColumn("Status", options=tracker_db.STATUSES),
+                "type": st.column_config.SelectboxColumn("Type", options=TYPE_OPTIONS),
+                "fit_score": st.column_config.NumberColumn("Fit %", width="small"),
+                "fit_reason": st.column_config.TextColumn("Why / why not", width="large"),
+                "coverage": st.column_config.NumberColumn("Cov %", width="small"),
+                "link": st.column_config.LinkColumn("Link"),
+                "fit_notes": st.column_config.TextColumn("Fit notes", width="large"),
+            },
+        )
+        b1, b2, _spacer = st.columns([1, 1, 2])
+        passed = [r for r in roles if (r["status"] or "") == "Pass"]
+        if passed and b1.button(f"🧹 Remove {len(passed)} Pass",
+                                help="Archive every role marked Pass to clear the list "
+                                     "(reversible below)"):
+            tracker_db.archive_roles(conn, [r["id"] for r in passed])
+            st.toast(f"Archived {len(passed)} passed role(s)")
+            st.rerun()
+        if b2.button(
+            "🧹 Archive duplicate re-posts",
+            help="Same vacancy posted again (by another agency, or with the employer "
+                 "spelled differently). Keeps the earliest; archiving is reversible below.",
+        ):
+            archived = hunt.dedupe_board(conn)
+            if archived:
+                st.toast(f"Archived {len(archived)} duplicate(s). Restore from the Archive panel.")
+            else:
+                st.toast("No duplicates found.")
             st.rerun()
 
-    f1, f2 = st.columns([3, 1.6])
-    selected = f1.multiselect(
-        "Filter by status", tracker_db.STATUSES, default=tracker_db.STATUSES
-    )
-    workstyle = f2.selectbox(
-        "Home working", ["Any", "Remote friendly", "Mostly home (4+ days a week)"],
-        help="Read from each advert's own text (snippet or fetched JD). Adverts "
-             "that do not state a split stay under Any only: unstated is not the "
-             "same as not remote.",
-    )
+        _draft_queue(conn, roles)
+        _followups_due(conn, due)
 
-    # Roles sitting in the To-draft queue below are hidden here to keep the list
-    # clean; they return to the grid once drafted, ready to be marked Applied.
-    queued_ids = {
-        r["id"] for r in roles
-        if (r["status"] or "") in tracker_draft.CV_QUEUE_STATUSES and not r.get("cv_file")
-    }
-    view = [
-        r for r in roles
-        if (r["status"] or "") in selected and r["id"] not in queued_ids
-    ]
-    if workstyle != "Any":
-        def _ws_ok(r):
-            texts = (r.get("title") or "", r.get("jd_text") or "", r.get("fit_notes") or "")
-            days = hunt.home_days(*texts)
-            if workstyle.startswith("Mostly"):
-                return days is not None and days >= 4
-            return days is not None or bool(hunt.workstyle_signals(*texts))
-        view = [r for r in view if _ws_ok(r)]
-    # Ranked triage: scored roles first, best fit at the top; unscored keep
-    # their newest-first order below (the sort is stable).
-    view.sort(
-        key=lambda r: (r.get("fit_score") is not None, r.get("fit_score") or 0),
-        reverse=True,
-    )
-    # Remember the displayed row ids (in order) so the edit callback maps correctly.
-    st.session_state["grid_ids"] = [r["id"] for r in view]
+    _archive_panel(conn)
 
+with tab_applied:
+    applied_roles = [r for r in roles if (r.get("status") or "") == "Applied"]
+    st.caption(f"{len(applied_roles)} role(s) marked Applied.")
+    if not applied_roles:
+        st.info("No roles marked Applied yet.")
+    else:
+        adf = pd.DataFrame(applied_roles)
+        adf["open"] = adf["link"]
+        adf = adf[["id", "status", "title", "open", "type", "rate", "location",
+                   "company", "date_found", "date_applied", "link"]]
+        st.dataframe(
+            adf,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "id": st.column_config.NumberColumn("ID", width="small"),
+                "status": st.column_config.TextColumn("Status", width="small"),
+                "title": st.column_config.TextColumn("Title"),
+                "open": st.column_config.LinkColumn("Link to", display_text="open",
+                                                    width="small"),
+                "type": st.column_config.TextColumn("Type", width="small"),
+                "rate": st.column_config.TextColumn("Rate"),
+                "location": st.column_config.TextColumn("Location"),
+                "company": st.column_config.TextColumn("Company"),
+                "date_found": st.column_config.TextColumn("Found", width="small"),
+                "date_applied": st.column_config.TextColumn("Date applied", width="small"),
+                "link": st.column_config.LinkColumn("Link"),
+            },
+        )
+
+@st.cache_data(show_spinner=False)
+def _extract_cached(path_str: str, mtime: float) -> str:
+    """Cached per (path, mtime): a rerun does not re-parse an unchanged file.
+
+    Streamlit reruns the whole script on any interaction anywhere in the app,
+    so without this, every saved source (PDFs especially) gets re-parsed on
+    every click, which is the actual cause of the tab greying out, not just
+    the upload step itself.
+    """
+    return source_docs.extract_text(Path(path_str))
+
+
+def _sources_with_progress() -> list[dict]:
+    """Saved sources with their extracted text, showing real progress on any
+    file not yet cached (first read of a new/changed file only)."""
+    paths = source_docs.list_source_paths()
+    if not paths:
+        return []
+    out = []
+    bar = st.progress(0.0, text=f"Reading 0 of {len(paths)} source file(s)...")
+    for i, path in enumerate(paths, start=1):
+        text = _extract_cached(str(path), path.stat().st_mtime)
+        out.append({"path": path, "name": path.name, "chars": len(text), "text": text})
+        bar.progress(i / len(paths), text=f"Reading {i} of {len(paths)} source file(s)...")
+    bar.empty()
+    return out
+
+
+with tab_source:
     st.caption(
-        f"Showing {len(view)} of {len(roles)} role(s), best fit first once scored; "
-        f"roles in the To-draft queue appear below instead. Edit any cell; changes "
-        f"save automatically. Tick rows and press Delete to archive them."
+        "Upload old CVs, LinkedIn exports or notes below. More material than you "
+        "strictly need is fine on purpose: extraction only pulls facts that are "
+        "literally stated in what you upload, so extra source text just gives it "
+        "more true detail to draw from, never anything to invent."
     )
-    df = pd.DataFrame(view, columns=list(GRID_COLUMNS))
-    df["open"] = df["link"]  # compact clickable link beside the title
-    st.data_editor(
-        df,
-        key="roles_editor",
-        on_change=_persist_grid_edits,
-        width="stretch",
-        hide_index=True,
-        num_rows="dynamic",
-        disabled=READONLY_COLUMNS,
-        column_config={
-            "id": st.column_config.NumberColumn("ID", width="small"),
-            "date_found": st.column_config.TextColumn("Found", width="small"),
-            "open": st.column_config.LinkColumn("🔗", display_text="open", width="small"),
-            "status": st.column_config.SelectboxColumn("Status", options=tracker_db.STATUSES),
-            "type": st.column_config.SelectboxColumn("Type", options=TYPE_OPTIONS),
-            "fit_score": st.column_config.NumberColumn("Fit %", width="small"),
-            "fit_reason": st.column_config.TextColumn("Why / why not", width="large"),
-            "coverage": st.column_config.NumberColumn("Cov %", width="small"),
-            "link": st.column_config.LinkColumn("Link"),
-            "fit_notes": st.column_config.TextColumn("Fit notes", width="large"),
-        },
+
+    uploads = st.file_uploader(
+        "Add source CVs (.docx, .pdf, .txt)", type=["docx", "pdf", "txt"],
+        accept_multiple_files=True, key="source_uploader",
     )
-    b1, b2, _spacer = st.columns([1, 1, 2])
-    passed = [r for r in roles if (r["status"] or "") == "Pass"]
-    if passed and b1.button(f"🧹 Remove {len(passed)} Pass",
-                            help="Archive every role marked Pass to clear the list "
-                                 "(reversible below)"):
-        tracker_db.archive_roles(conn, [r["id"] for r in passed])
-        st.toast(f"Archived {len(passed)} passed role(s)")
-        st.rerun()
-    if b2.button(
-        "🧹 Archive duplicate re-posts",
-        help="Same vacancy posted again (by another agency, or with the employer "
-             "spelled differently). Keeps the earliest; archiving is reversible below.",
-    ):
-        archived = hunt.dedupe_board(conn)
-        if archived:
-            st.toast(f"Archived {len(archived)} duplicate(s). Restore from the Archive panel.")
+    if uploads:
+        # file_uploader keeps returning the same files on every rerun (it does
+        # not clear itself just because we rerun elsewhere), so track what has
+        # already been saved by (name, size) or this would resave forever.
+        saved_ids = st.session_state.setdefault("source_uploaded_ids", set())
+        new_files = [f for f in uploads if (f.name, f.size) not in saved_ids]
+        if new_files:
+            bar = st.progress(0.0, text=f"Saving 0 of {len(new_files)} file(s)...")
+            for i, f in enumerate(new_files, start=1):
+                source_docs.save_upload(f.name, f.getvalue())
+                saved_ids.add((f.name, f.size))
+                bar.progress(i / len(new_files), text=f"Saving {i} of {len(new_files)} file(s)...")
+            st.toast(f"Saved {len(new_files)} file(s)")
+            st.rerun()
+
+    sources = _sources_with_progress()
+    if sources:
+        st.markdown(f"**{len(sources)} source document(s)**")
+        for s in sources:
+            sc1, sc2, sc3 = st.columns([4, 1, 1])
+            sc1.write(s["name"])
+            sc2.caption(f"{s['chars']:,} chars")
+            if sc3.button("🗑", key=f"del_src_{s['name']}"):
+                source_docs.delete_source(s["path"])
+                st.rerun()
+    else:
+        st.info("No source documents yet. Upload at least one to extract from.")
+
+    st.divider()
+    st.subheader("Extract profile content")
+    source_llm = LocalLLM(base_url=settings.LLM_BASE_URL, model=_resolved_model())
+    source_up = source_llm.is_up()
+    if not source_up:
+        st.warning("Local model not reachable; start LM Studio's server to extract.")
+    if st.button("🔍 Extract from uploaded sources", type="primary",
+                 disabled=not source_up or not sources):
+        with st.spinner("Reading source documents locally..."):
+            extracted = profile_builder.extract_profile(
+                source_docs.combined_text(), source_llm
+            )
+        if not extracted or not extracted.get("jobs"):
+            st.warning("Nothing extractable found in the uploaded sources.")
         else:
-            st.toast("No duplicates found.")
+            st.session_state["profile_draft"] = extracted
         st.rerun()
 
-    _draft_queue(conn, roles)
-    _followups_due(conn, due)
+    profile_draft = st.session_state.get("profile_draft")
+    if profile_draft:
+        st.success(
+            f"Extracted {len(profile_draft.get('jobs', []))} role(s), "
+            f"{len(profile_draft.get('competencies', []))} competencies, "
+            f"{len(profile_draft.get('achievements', []))} achievement(s)."
+        )
+        st.json(profile_draft, expanded=False)
+        st.caption(
+            "Review above. Merging never removes anything already in your "
+            "profile: it only adds new roles and new bullets not already there."
+        )
+        if st.button("✅ Merge into profile.json", type="primary", key="merge_draft"):
+            merged = profile_builder.merge_profile(load_profile_or_empty(), profile_draft)
+            save_profile(merged)
+            st.session_state.pop("profile_draft", None)
+            st.toast("profile.json updated")
+            st.rerun()
 
-_archive_panel(conn)
+    st.divider()
+    st.subheader("Interview: fill the gaps")
+    current_profile = load_profile_or_empty()
+    if not current_profile:
+        st.info("Extract from a source CV first (above), then come back to fill gaps.")
+    else:
+        if st.button("💬 Find what's missing and ask", disabled=not source_up):
+            with st.spinner("Reviewing your profile locally..."):
+                st.session_state["gap_qs"] = profile_builder.gap_questions(
+                    current_profile, source_llm
+                )
+            st.rerun()
+
+        gap_qs = st.session_state.get("gap_qs")
+        if gap_qs:
+            for gi, gq in enumerate(gap_qs):
+                st.text_input(gq["question"], key=f"gapans_{gi}")
+            if st.button("Save my answers", type="primary"):
+                fresh_profile = load_profile_or_empty()
+                saved_n = 0
+                for gi, gq in enumerate(gap_qs):
+                    answer = st.session_state.get(f"gapans_{gi}", "").strip()
+                    if not answer:
+                        continue
+                    target = gq["target"]
+                    if target == "achievements":
+                        fresh_profile.setdefault("achievements", []).append(answer)
+                        saved_n += 1
+                    elif isinstance(target, int) and target < len(fresh_profile.get("jobs", [])):
+                        fresh_profile["jobs"][target].setdefault("bullets", []).append(answer)
+                        saved_n += 1
+                if saved_n:
+                    save_profile(fresh_profile)
+                    st.toast(f"Added {saved_n} answer(s) to profile.json")
+                st.session_state.pop("gap_qs", None)
+                st.rerun()
+        elif gap_qs is not None:
+            st.success("No gaps found — profile looks solid.")

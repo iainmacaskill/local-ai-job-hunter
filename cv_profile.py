@@ -28,3 +28,22 @@ def load_profile(path: str | os.PathLike | None = None) -> dict:
             f"(or set CVDRAFTER_PROFILE) and fill in your details."
         )
     return json.loads(p.read_text(encoding="utf-8"))
+
+
+def save_profile(profile: dict, path: str | os.PathLike | None = None) -> Path:
+    """Write ``profile`` to profile.json (or ``path``), pretty-printed."""
+    p = Path(path) if path else PROFILE_PATH
+    p.write_text(json.dumps(profile, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return p
+
+
+def load_profile_or_empty(path: str | os.PathLike | None = None) -> dict:
+    """load_profile(), but a missing file returns {} instead of raising.
+
+    For the Source CV tab, which is exactly the place profile.json may not
+    exist yet.
+    """
+    try:
+        return load_profile(path)
+    except FileNotFoundError:
+        return {}
