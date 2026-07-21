@@ -241,7 +241,10 @@ def apply_editor_changes(conn: sqlite3.Connection, ordered_ids, edited_rows) -> 
     """
     updated = 0
     for idx, changes in (edited_rows or {}).items():
-        role_id = ordered_ids[int(idx)]
+        i = int(idx)
+        if not (0 <= i < len(ordered_ids)):  # stale/out-of-range edit index: skip, don't crash the save
+            continue
+        role_id = ordered_ids[i]
         clean = {k: v for k, v in changes.items() if k in _FIELDS}
         # Moving a role to Applied stamps date_applied (unless set), so the
         # follow-up due date works without the user typing dates by hand.

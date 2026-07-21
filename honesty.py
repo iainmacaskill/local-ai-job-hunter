@@ -21,6 +21,8 @@ from dataclasses import dataclass, field
 
 EM_DASH = "—"
 
+_STOP = {"and", "the", "of", "for", "with", "to", "in", "on", "an", "a", "or"}
+
 _WORDNUM = {
     "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
     "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12",
@@ -43,6 +45,20 @@ class HonestyReport:
         else:
             head = "clean"
         return head
+
+
+class HonestyError(RuntimeError):
+    """Raised when a payload fails the block-tier structural check.
+
+    Carries the full report so a caller can surface the offending errors (an
+    invented, renamed or reordered employer/title/date) rather than emit a CV
+    that misrepresents the candidate's history.
+    """
+
+    def __init__(self, report: "HonestyReport") -> None:
+        self.report = report
+        detail = "; ".join(report.errors) or report.summary()
+        super().__init__(f"honesty guard blocked render: {detail}")
 
 
 def _key(s: str | None) -> str:
@@ -78,8 +94,35 @@ def _profile_numbers(profile: dict) -> set[str]:
 def _all_prose(payload: dict) -> str:
     parts = [payload.get("summary", ""), *payload.get("core_skills", [])]
     for exp in payload.get("experience", []):
+        if exp.get("intro"):
+            parts.append(exp["intro"])
         parts.extend(exp.get("bullets", []))
     return "\n".join(str(p) for p in parts)
+
+
+def _words(text: str | None) -> set[str]:
+    """Content words (len >= 2, stopwords dropped) for coarse grounding checks."""
+    return {
+        w for w in re.split(r"[^a-z0-9]+", (text or "").lower())
+        if len(w) >= 2 and w not in _STOP
+    }
+
+
+def _profile_vocab(profile: dict) -> set[str]:
+    """Every content word the profile actually contains (the source of truth)."""
+    vocab: set[str] = set()
+    for comp in profile.get("competencies", []):
+        vocab |= _words(comp)
+    for job in profile.get("jobs", []):
+        vocab |= _words(job.get("title"))
+        for bullet in job.get("bullets", []):
+            vocab |= _words(bullet)
+    for ach in profile.get("achievements", []):
+        vocab |= _words(ach)
+    vocab |= _words(profile.get("summary", ""))
+    vocab |= _words(profile.get("certifications", ""))
+    vocab |= _words(profile.get("education", ""))
+    return vocab
 
 
 def verify(payload: dict, profile: dict) -> HonestyReport:
@@ -106,16 +149,28 @@ def verify(payload: dict, profile: dict) -> HonestyReport:
                 f"{exp.get('dates')!r} != {job.get('dates')!r}"
             )
 
-    # 2. figures — any number not found anywhere in the profile is suspect
+    # 2. figures — any number not found anywhere in the profile is suspect.
+    # Scans every model-authored line, including a role's optional intro.
     allowed = _profile_numbers(profile)
     for exp in payload.get("experience", []):
-        for bullet in exp.get("bullets", []):
-            for num in _numbers(bullet) - allowed:
-                warnings.append(f"unverified figure {num!r} in {exp.get('company')} bullet")
+        lines = list(exp.get("bullets", []))
+        if exp.get("intro"):
+            lines.append(exp["intro"])
+        for line in lines:
+            for num in _numbers(line) - allowed:
+                warnings.append(f"unverified figure {num!r} in {exp.get('company')} line")
     for num in _numbers(payload.get("summary", "")) - allowed:
         warnings.append(f"unverified figure {num!r} in summary")
 
-    # 3. house style
+    # 3. core skills — each mirrored advert term should share vocabulary with the
+    # profile; one that shares none is a likely fabricated skill (JD-injected).
+    vocab = _profile_vocab(profile)
+    for skill in payload.get("core_skills", []):
+        toks = _words(skill)
+        if toks and not (toks & vocab):
+            warnings.append(f"core skill not grounded in profile: {str(skill)!r}")
+
+    # 4. house style
     if EM_DASH in _all_prose(payload):
         warnings.append("em dash present (house style: use none)")
 
