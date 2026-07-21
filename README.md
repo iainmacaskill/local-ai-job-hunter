@@ -46,8 +46,10 @@ running **on your own laptop**, using a free desktop app called
 [LM Studio](https://lmstudio.ai/).
 
 - **One-time setup:** install LM Studio, download a model through its built-in
-  browser (this tool uses `qwen3.6-27b`, a large download of roughly 16 GB), and
-  click to start its local server. That is the whole AI installation.
+  browser (this tool uses `qwen3.6-27b`, a large download of roughly 16 GB, with a
+  lighter `qwen3.5-9b` option for a 16 GB machine), and click to start its local
+  server. That is the whole AI installation, walked through step by step in
+  [docs/getting-started.md](docs/getting-started.md).
 - **After that:** drafting costs nothing per use, works without sharing your data,
   and your CV, profile and application history stay on your machine. The only thing
   that ever goes out is the job-board search itself.
@@ -112,10 +114,17 @@ If that capability would be useful to your team, I am at
 
 ## Run it yourself
 
-The short version for the technically comfortable; each step is a one-time setup.
+**New to running local AI models? Follow the full step-by-step walkthrough in
+[docs/getting-started.md](docs/getting-started.md).** It covers installing LM Studio,
+choosing the right model for your machine, setting the tool up, and using it day to
+day, with a troubleshooting section. No command-line or AI experience assumed.
 
-**1. The AI.** Install [LM Studio](https://lmstudio.ai/), download `qwen3.6-27b`,
-and start the local server on port `1234` (Developer tab).
+The short version below is for the technically comfortable; each step is a one-time
+setup.
+
+**1. The AI.** Install [LM Studio](https://lmstudio.ai/), download `qwen3.6-27b`
+(or the lighter `qwen3.5-9b` on a 16 GB machine), load it, and start the local server
+on port `1234` (Developer tab). The tool auto-detects whichever model is loaded.
 
 **2. The tool.**
 
